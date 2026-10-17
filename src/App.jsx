@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import logo from '../sources/logo.jpg';
 import {
   Upload, Eraser, Grid, Layers, Maximize2, Download, Undo2, Redo2,
   ZoomIn, ZoomOut, Shirt, Sparkles, Sliders, Check, RefreshCw, Eye,
@@ -1387,8 +1388,8 @@ export default function App() {
       <header className="h-16 bg-zinc-900/90 border-b border-zinc-800 px-4 lg:px-6 flex items-center justify-between gap-3 z-20 backdrop-blur-md">
         {/* Marca */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 via-blue-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Layers className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden bg-white shadow-lg shadow-cyan-500/20">
+            <img src={logo} alt="AmazoniaInk" className="w-full h-full object-cover" />
           </div>
           <div>
             <div className="flex items-center gap-2">
