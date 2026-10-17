@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/amazoniaink-pro/',
+  base: '/AmazoniaInk-Pro/',
 });

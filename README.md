@@ -34,7 +34,7 @@ npm run preview
 
 ## Publicación en GitHub Pages
 
-El proyecto incluye un workflow de GitHub Actions que compila y publica el sitio en GitHub Pages cuando se hace `push` a la rama `main`. La configuración de Vite usa la ruta del repositorio `amazoniaink-pro`.
+El proyecto incluye un workflow de GitHub Actions que compila y publica el sitio en GitHub Pages cuando se hace `push` a la rama `main`. La configuración de Vite usa la ruta del repositorio `AmazoniaInk-Pro` (respetando mayúsculas y minúsculas).
 
 1. Sube el proyecto a un repositorio público de GitHub llamado `amazoniaink-pro`.
 2. En el repositorio, abre **Settings → Pages** y selecciona **GitHub Actions** como origen del despliegue.
