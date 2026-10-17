@@ -1494,15 +1494,14 @@ export default function App() {
       };
     }
     const colorMap = {
-      'shirt-black': '#0f0f12',
-      'shirt-white': '#f8fafc',
+      'shirt-black': '#000000',
+      'shirt-white': '#ffffff',
       'shirt-gray': '#52525b',
       'shirt-custom': customShirtColor
     };
     return {
       backgroundColor: colorMap[bgPreviewMode] || '#0f0f12',
-      backgroundImage:
-        'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.28) 100%)'
+      backgroundImage: 'none'
     };
   };
 
