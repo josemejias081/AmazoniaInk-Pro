@@ -1116,7 +1116,7 @@ export default function App() {
         ctx,
         canvas.width,
         canvas.height,
-        bgPreviewMode === 'shirt-black' ? '#22d3ee' : '#09090b'
+        bgPreviewMode === 'shirt-black' ? '#34d399' : '#09090b'
       );
     }
 
@@ -1357,14 +1357,14 @@ export default function App() {
     if (bgPreviewMode === 'checker') {
       return {
         backgroundImage: `
-          linear-gradient(45deg, #27272a 25%, transparent 25%),
-          linear-gradient(-45deg, #27272a 25%, transparent 25%),
-          linear-gradient(45deg, transparent 75%, #27272a 75%),
-          linear-gradient(-45deg, transparent 75%, #27272a 75%)
+          linear-gradient(45deg, #292524 25%, transparent 25%),
+          linear-gradient(-45deg, #292524 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #292524 75%),
+          linear-gradient(-45deg, transparent 75%, #292524 75%)
         `,
         backgroundSize: '24px 24px',
         backgroundPosition: '0 0, 0 12px, 12px -12px, -12px 0',
-        backgroundColor: '#18181b'
+        backgroundColor: '#1c1917'
       };
     }
     const colorMap = {
@@ -1381,14 +1381,14 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans select-none overflow-x-hidden">
+    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans select-none overflow-x-hidden">
       {/* ====================================================================
           BARRA SUPERIOR (HEADER)
       ==================================================================== */}
-      <header className="h-16 bg-zinc-900/90 border-b border-zinc-800 px-4 lg:px-6 flex items-center justify-between gap-3 z-20 backdrop-blur-md">
+      <header className="h-16 bg-stone-900/90 border-b border-stone-800 px-4 lg:px-6 flex items-center justify-between gap-3 z-20 backdrop-blur-md">
         {/* Marca */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl overflow-hidden bg-white shadow-lg shadow-cyan-500/20">
+          <div className="w-10 h-10 rounded-xl overflow-hidden bg-white shadow-lg shadow-emerald-500/20">
             <img src={logo} alt="AmazoniaInk" className="w-full h-full object-cover" />
           </div>
           <div>
@@ -1396,11 +1396,11 @@ export default function App() {
               <h1 className="font-bold text-base lg:text-lg tracking-tight text-white">
                 AmazoniaInk <span className="text-green-950 bg-white rounded-md p-1">Pro</span>
               </h1>
-              <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+              <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-stone-100 border border-emerald-500/30">
                 DTF • Sublimación • Serigrafía
               </span>
             </div>
-            <p className="text-xs text-zinc-400 hidden md:block">
+            <p className="text-xs text-stone-400 hidden md:block">
               Laboratorio de preimpresión, semitonos, vectorización y corte de fondos
             </p>
           </div>
@@ -1408,14 +1408,14 @@ export default function App() {
 
         {/* Presets rápidos de prueba + Subida de archivo */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="hidden xl:flex items-center gap-1.5 bg-zinc-800/80 p-1 rounded-lg border border-zinc-700/60">
-            <span className="text-[11px] text-zinc-400 px-2 font-medium">Ejemplos:</span>
+          <div className="hidden xl:flex items-center gap-1.5 bg-stone-800/80 p-1 rounded-lg border border-stone-700/60">
+            <span className="text-[11px] text-stone-400 px-2 font-medium">Ejemplos:</span>
             <button
               onClick={() => loadSamplePreset('tiger', 'Tigre Retro DTF')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                 activePresetName === 'Tigre Retro DTF'
-                  ? 'bg-cyan-500 text-zinc-950 font-semibold'
-                  : 'text-zinc-300 hover:bg-zinc-700'
+                  ? 'bg-emerald-500 text-stone-950 font-semibold'
+                  : 'text-stone-300 hover:bg-stone-700'
               }`}
             >
               🐯 Tigre DTF
@@ -1424,8 +1424,8 @@ export default function App() {
               onClick={() => loadSamplePreset('sunset', 'Atardecer Retro')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                 activePresetName === 'Atardecer Retro'
-                  ? 'bg-cyan-500 text-zinc-950 font-semibold'
-                  : 'text-zinc-300 hover:bg-zinc-700'
+                  ? 'bg-emerald-500 text-stone-950 font-semibold'
+                  : 'text-stone-300 hover:bg-stone-700'
               }`}
             >
               🌅 Atardecer (Fondo Blanco)
@@ -1434,16 +1434,16 @@ export default function App() {
               onClick={() => loadSamplePreset('skull', 'Emblema Serigrafía')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                 activePresetName === 'Emblema Serigrafía'
-                  ? 'bg-cyan-500 text-zinc-950 font-semibold'
-                  : 'text-zinc-300 hover:bg-zinc-700'
+                  ? 'bg-emerald-500 text-stone-950 font-semibold'
+                  : 'text-stone-300 hover:bg-stone-700'
               }`}
             >
               💀 Skull (Colores Planos)
             </button>
           </div>
 
-          <label className="cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
-            <Upload className="w-4 h-4 text-cyan-400" />
+          <label className="cursor-pointer bg-stone-800 hover:bg-stone-700 text-stone-100 border border-stone-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
+            <Upload className="w-4 h-4 text-emerald-400" />
             <span>Subir Imagen</span>
             <input
               type="file"
@@ -1454,23 +1454,23 @@ export default function App() {
           </label>
 
           {/* Undo / Redo */}
-          <div className="flex items-center bg-zinc-800/90 rounded-lg border border-zinc-700 p-0.5">
+          <div className="flex items-center bg-stone-800/90 rounded-lg border border-stone-700 p-0.5">
             <button
               onClick={() => setHistoryIndex(i => Math.max(0, i - 1))}
               disabled={historyIndex <= 0}
               title="Deshacer"
-              className="p-1.5 rounded-md hover:bg-zinc-700 disabled:opacity-30 transition"
+              className="p-1.5 rounded-md hover:bg-stone-700 disabled:opacity-30 transition"
             >
               <Undo2 className="w-4 h-4" />
             </button>
-            <span className="text-[11px] text-zinc-400 px-2 font-mono">
+            <span className="text-[11px] text-stone-400 px-2 font-mono">
               {historyIndex + 1}/{history.length}
             </span>
             <button
               onClick={() => setHistoryIndex(i => Math.min(history.length - 1, i + 1))}
               disabled={historyIndex >= history.length - 1}
               title="Rehacer"
-              className="p-1.5 rounded-md hover:bg-zinc-700 disabled:opacity-30 transition"
+              className="p-1.5 rounded-md hover:bg-stone-700 disabled:opacity-30 transition"
             >
               <Redo2 className="w-4 h-4" />
             </button>
@@ -1478,7 +1478,7 @@ export default function App() {
 
           <button
             onClick={downloadHighResPNG}
-            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-zinc-950 font-bold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition"
           >
             <Download className="w-4 h-4" />
             <span className="hidden sm:inline">Descargar PNG</span>
@@ -1488,8 +1488,8 @@ export default function App() {
 
       {/* Notificación Toast */}
       {notification && (
-        <div className="fixed bottom-5 right-5 z-50 bg-zinc-900/95 border border-cyan-500/50 text-zinc-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 animate-bounce">
-          <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+        <div className="fixed bottom-5 right-5 z-50 bg-stone-900/95 border border-emerald-500/50 text-stone-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 animate-bounce">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="text-xs font-medium">{notification.msg}</span>
         </div>
       )}
@@ -1501,9 +1501,9 @@ export default function App() {
         {/* ------------------------------------------------------------------
             1. MENÚ LATERAL IZQUIERDO (MÓDULOS DE TRABAJO)
         ------------------------------------------------------------------ */}
-        <aside className="w-full lg:w-64 bg-zinc-900 border-b lg:border-b-0 lg:border-r border-zinc-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0">
+        <aside className="w-full lg:w-64 bg-stone-900 border-b lg:border-b-0 lg:border-r border-stone-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0">
           <div className="flex lg:flex-col gap-1.5 w-full">
-            <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-zinc-500 px-3 py-1.5">
+            <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-stone-500 px-3 py-1.5">
               Flujo de Trabajo
             </div>
 
@@ -1552,20 +1552,20 @@ export default function App() {
                   onClick={() => setActiveTab(item.id)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition shrink-0 lg:w-full border ${
                     active
-                      ? 'bg-gradient-to-r from-cyan-500/20 to-blue-600/10 border-cyan-500/50 text-white shadow-sm'
-                      : 'border-transparent text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200'
+                      ? 'bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border-emerald-500/50 text-white shadow-sm'
+                      : 'border-transparent text-stone-400 hover:bg-stone-800/70 hover:text-stone-200'
                   }`}
                 >
                   <div
                     className={`p-2 rounded-lg ${
-                      active ? 'bg-cyan-500 text-zinc-950' : 'bg-zinc-800 text-zinc-400'
+                      active ? 'bg-emerald-500 text-stone-950' : 'bg-stone-800 text-stone-400'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold truncate">{item.title}</div>
-                    <div className="text-[11px] text-zinc-400 truncate hidden sm:block">
+                    <div className="text-[11px] text-stone-400 truncate hidden sm:block">
                       {item.subtitle}
                     </div>
                   </div>
@@ -1575,16 +1575,16 @@ export default function App() {
           </div>
 
           {/* Tarjeta informativa del estado actual del archivo */}
-          <div className="hidden lg:flex flex-col gap-2 bg-zinc-950/80 border border-zinc-800/90 rounded-xl p-3 text-xs">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="font-semibold text-zinc-300">Archivo Activo</span>
-              <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded text-cyan-400 font-mono">
+          <div className="hidden lg:flex flex-col gap-2 bg-stone-950/80 border border-stone-800/90 rounded-xl p-3 text-xs">
+            <div className="flex items-center justify-between text-stone-400">
+              <span className="font-semibold text-stone-300">Archivo Activo</span>
+              <span className="text-[10px] bg-stone-800 px-2 py-0.5 rounded text-emerald-400 font-mono">
                 {imageSize.width}×{imageSize.height}px
               </span>
             </div>
-            <div className="text-[11px] text-zinc-400 truncate">{activePresetName}</div>
-            <div className="pt-1 border-t border-zinc-800 flex items-center justify-between text-[11px]">
-              <span className="text-zinc-400">Salida física:</span>
+            <div className="text-[11px] text-stone-400 truncate">{activePresetName}</div>
+            <div className="pt-1 border-t border-stone-800 flex items-center justify-between text-[11px]">
+              <span className="text-stone-400">Salida física:</span>
               <span className="text-emerald-400 font-mono font-semibold">
                 {printWidthCm}×{printHeightCm} {printUnit} ({printDpi} DPI)
               </span>
@@ -1601,13 +1601,13 @@ export default function App() {
         {/* ------------------------------------------------------------------
             2. LIENZO CENTRAL INTERACTIVO Y SIMULADOR DE CAMISETA
         ------------------------------------------------------------------ */}
-        <main className="flex-1 flex flex-col bg-zinc-950 relative overflow-hidden min-h-[420px]">
+        <main className="flex-1 flex flex-col bg-stone-950 relative overflow-hidden min-h-[420px]">
           {/* Barra flotante superior: Simulador de Prenda y Comparador */}
-          <div className="bg-zinc-900/80 border-b border-zinc-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 z-10">
+          <div className="bg-stone-900/80 border-b border-stone-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 z-10">
             {/* Selector de fondo / Prenda */}
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-zinc-400 flex items-center gap-1 mr-1">
-                <Shirt className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-xs text-stone-400 flex items-center gap-1 mr-1">
+                <Shirt className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="hidden sm:inline">Simular Prenda:</span>
               </span>
 
@@ -1615,8 +1615,8 @@ export default function App() {
                 onClick={() => setBgPreviewMode('checker')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border transition ${
                   bgPreviewMode === 'checker'
-                    ? 'bg-zinc-800 border-cyan-500 text-cyan-300'
-                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-stone-800 border-emerald-500 text-emerald-300'
+                    : 'border-stone-700 text-stone-400 hover:text-stone-200'
                 }`}
               >
                 Transparente
@@ -1625,36 +1625,36 @@ export default function App() {
                 onClick={() => setBgPreviewMode('shirt-black')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
                   bgPreviewMode === 'shirt-black'
-                    ? 'bg-zinc-800 border-cyan-500 text-white'
-                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-stone-800 border-emerald-500 text-white'
+                    : 'border-stone-700 text-stone-400 hover:text-stone-200'
                 }`}
               >
-                <span className="w-2.5 h-2.5 rounded-full bg-black border border-zinc-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-black border border-stone-500" />
                 Camiseta Negra
               </button>
               <button
                 onClick={() => setBgPreviewMode('shirt-white')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
                   bgPreviewMode === 'shirt-white'
-                    ? 'bg-zinc-800 border-cyan-500 text-white'
-                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-stone-800 border-emerald-500 text-white'
+                    : 'border-stone-700 text-stone-400 hover:text-stone-200'
                 }`}
               >
-                <span className="w-2.5 h-2.5 rounded-full bg-white border border-zinc-400" />
+                <span className="w-2.5 h-2.5 rounded-full bg-white border border-stone-400" />
                 Blanca
               </button>
               <button
                 onClick={() => setBgPreviewMode('shirt-gray')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
                   bgPreviewMode === 'shirt-gray'
-                    ? 'bg-zinc-800 border-cyan-500 text-white'
-                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-stone-800 border-emerald-500 text-white'
+                    : 'border-stone-700 text-stone-400 hover:text-stone-200'
                 }`}
               >
-                <span className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-stone-500" />
                 Gris Jaspe
               </button>
-              <label className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-800/60 text-xs cursor-pointer">
+              <label className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-stone-700 bg-stone-800/60 text-xs cursor-pointer">
                 <input
                   type="color"
                   value={customShirtColor}
@@ -1664,7 +1664,7 @@ export default function App() {
                   }}
                   className="w-4 h-4 bg-transparent border-0 cursor-pointer"
                 />
-                <span className="text-[11px] text-zinc-300">Color Textil</span>
+                <span className="text-[11px] text-stone-300">Color Textil</span>
               </label>
             </div>
 
@@ -1674,28 +1674,28 @@ export default function App() {
                 onClick={() => setCompareSplit(!compareSplit)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
                   compareSplit
-                    ? 'bg-fuchsia-500/20 border-fuchsia-500 text-fuchsia-300'
-                    : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                    : 'border-stone-700 text-stone-300 hover:bg-stone-800'
                 }`}
               >
                 <SplitSquareVertical className="w-3.5 h-3.5" />
                 <span>Antes / Después</span>
               </button>
 
-              <div className="flex items-center bg-zinc-800 rounded-md border border-zinc-700">
+              <div className="flex items-center bg-stone-800 rounded-md border border-stone-700">
                 <button
                   onClick={() => setZoom(z => Math.max(0.25, +(z - 0.15).toFixed(2)))}
-                  className="p-1.5 hover:bg-zinc-700 text-zinc-300"
+                  className="p-1.5 hover:bg-stone-700 text-stone-300"
                   title="Alejar"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="text-xs font-mono px-2 text-zinc-300">
+                <span className="text-xs font-mono px-2 text-stone-300">
                   {Math.round(zoom * 100)}%
                 </span>
                 <button
                   onClick={() => setZoom(z => Math.min(2.2, +(z + 0.15).toFixed(2)))}
-                  className="p-1.5 hover:bg-zinc-700 text-zinc-300"
+                  className="p-1.5 hover:bg-stone-700 text-stone-300"
                   title="Acercar"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
@@ -1707,7 +1707,7 @@ export default function App() {
           {/* Área del Lienzo */}
           <div className="flex-1 overflow-auto flex items-center justify-center p-6 relative">
             <div
-              className="relative rounded-xl shadow-2xl border border-zinc-700/80 transition-all duration-150 overflow-hidden"
+              className="relative rounded-xl shadow-2xl border border-stone-700/80 transition-all duration-150 overflow-hidden"
               style={{
                 width: `${Math.round(imageSize.width * zoom)}px`,
                 height: `${Math.round(imageSize.height * zoom)}px`,
@@ -1716,8 +1716,8 @@ export default function App() {
             >
               {/* Etiqueta indicadora de prenda */}
               {bgPreviewMode !== 'checker' && (
-                <div className="absolute top-2.5 left-2.5 z-10 bg-black/65 backdrop-blur-sm text-[10px] text-zinc-200 px-2.5 py-1 rounded-full border border-white/15 pointer-events-none flex items-center gap-1.5">
-                  <Shirt className="w-3 h-3 text-cyan-400" />
+                <div className="absolute top-2.5 left-2.5 z-10 bg-black/65 backdrop-blur-sm text-[10px] text-stone-200 px-2.5 py-1 rounded-full border border-white/15 pointer-events-none flex items-center gap-1.5">
+                  <Shirt className="w-3 h-3 text-emerald-400" />
                   <span>Vista previa sobre prenda textil</span>
                 </div>
               )}
@@ -1745,7 +1745,7 @@ export default function App() {
               {compareSplit && (
                 <>
                   <div
-                    className="absolute inset-y-0 left-0 overflow-hidden pointer-events-none border-r-2 border-fuchsia-400"
+                    className="absolute inset-y-0 left-0 overflow-hidden pointer-events-none border-r-2 border-emerald-400"
                     style={{ width: `${splitPos}%` }}
                   >
                     <canvas
@@ -1760,7 +1760,7 @@ export default function App() {
                       ORIGINAL
                     </span>
                   </div>
-                  <span className="absolute bottom-3 right-3 bg-cyan-500 text-zinc-950 text-[10px] font-bold px-2 py-0.5 rounded pointer-events-none">
+                  <span className="absolute bottom-3 right-3 bg-emerald-500 text-stone-950 text-[10px] font-bold px-2 py-0.5 rounded pointer-events-none">
                     PROCESADO
                   </span>
                   <input
@@ -1777,9 +1777,9 @@ export default function App() {
           </div>
 
           {/* Barra inferior de ayuda contextual */}
-          <div className="bg-zinc-900/90 border-t border-zinc-800 px-4 py-2 text-xs text-zinc-400 flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-stone-900/90 border-t border-stone-800 px-4 py-2 text-xs text-stone-400 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               {activeTab === 'bg' && (
                 <span>
                   <strong>Consejo DTF:</strong> Haz clic directamente sobre el fondo del lienzo para capturar su color. Usa{' '}
@@ -1807,7 +1807,7 @@ export default function App() {
                 </span>
               )}
             </div>
-            <div className="text-[11px] text-zinc-500 font-mono">
+            <div className="text-[11px] text-stone-500 font-mono">
               Formato actual: {printWidthCm} × {printHeightCm} {printUnit} @ {printDpi} DPI
             </div>
           </div>
@@ -1816,7 +1816,7 @@ export default function App() {
         {/* ------------------------------------------------------------------
             3. PANEL LATERAL DERECHO (CONTROLES DE CADA MÓDULO)
         ------------------------------------------------------------------ */}
-        <aside className="w-full lg:w-96 bg-zinc-900 border-t lg:border-t-0 lg:border-l border-zinc-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6">
+        <aside className="w-full lg:w-96 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6">
           {/* ================================================================
               PANEL 1: QUITAR FONDO Y KNOCKOUT DE COLOR
           ================================================================ */}
@@ -1824,22 +1824,22 @@ export default function App() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Eraser className="w-4 h-4 text-cyan-400" />
+                  <Eraser className="w-4 h-4 text-emerald-400" />
                   Quitar Fondo y Knockout DTF
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-stone-400 mt-1">
                   Elimina fondos sólidos o haz un vaciado del color negro/blanco para estampación textil.
                 </p>
               </div>
 
               {/* Modo de herramienta sobre el lienzo */}
-              <div className="grid grid-cols-3 gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+              <div className="grid grid-cols-3 gap-1.5 bg-stone-950 p-1 rounded-xl border border-stone-800">
                 <button
                   onClick={() => setBgInteractionMode('picker')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'picker'
-                      ? 'bg-cyan-500 text-zinc-950'
-                      : 'text-zinc-400 hover:text-white'
+                      ? 'bg-emerald-500 text-stone-950'
+                      : 'text-stone-400 hover:text-white'
                   }`}
                 >
                   <Crosshair className="w-4 h-4" />
@@ -1849,8 +1849,8 @@ export default function App() {
                   onClick={() => setBgInteractionMode('eraser')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'eraser'
-                      ? 'bg-cyan-500 text-zinc-950'
-                      : 'text-zinc-400 hover:text-white'
+                      ? 'bg-emerald-500 text-stone-950'
+                      : 'text-stone-400 hover:text-white'
                   }`}
                 >
                   <Eraser className="w-4 h-4" />
@@ -1860,8 +1860,8 @@ export default function App() {
                   onClick={() => setBgInteractionMode('restore')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'restore'
-                      ? 'bg-cyan-500 text-zinc-950'
-                      : 'text-zinc-400 hover:text-white'
+                      ? 'bg-emerald-500 text-stone-950'
+                      : 'text-stone-400 hover:text-white'
                   }`}
                 >
                   <Paintbrush className="w-4 h-4" />
@@ -1872,9 +1872,9 @@ export default function App() {
               {bgInteractionMode === 'picker' ? (
                 <>
                   {/* Color objetivo a eliminar */}
-                  <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-3">
+                  <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-zinc-300">
+                      <span className="text-xs font-semibold text-stone-300">
                         Color a Eliminar (Clic en lienzo)
                       </span>
                       <div className="flex items-center gap-2">
@@ -1884,7 +1884,7 @@ export default function App() {
                           onChange={(e) => setBgTargetColor(e.target.value)}
                           className="w-7 h-7 rounded cursor-pointer bg-transparent border-0"
                         />
-                        <span className="text-xs font-mono text-cyan-400 uppercase">
+                        <span className="text-xs font-mono text-emerald-400 uppercase">
                           {bgTargetColor}
                         </span>
                       </div>
@@ -1894,24 +1894,24 @@ export default function App() {
                     <div className="flex items-center gap-1.5 pt-1">
                       <button
                         onClick={() => setBgTargetColor('#ffffff')}
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 flex items-center justify-center gap-1.5"
+                        className="flex-1 py-1.5 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-[11px] font-medium text-stone-200 flex items-center justify-center gap-1.5"
                       >
-                        <span className="w-3 h-3 rounded-full bg-white border border-zinc-400" />
+                        <span className="w-3 h-3 rounded-full bg-white border border-stone-400" />
                         Fondo Blanco
                       </button>
                       <button
                         onClick={() => setBgTargetColor('#000000')}
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 flex items-center justify-center gap-1.5"
+                        className="flex-1 py-1.5 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-[11px] font-medium text-stone-200 flex items-center justify-center gap-1.5"
                       >
-                        <span className="w-3 h-3 rounded-full bg-black border border-zinc-600" />
+                        <span className="w-3 h-3 rounded-full bg-black border border-stone-600" />
                         Negro (Knockout)
                       </button>
                     </div>
                   </div>
 
                   {/* Modo Contiguo vs Global Knockout */}
-                  <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-2">
-                    <label className="text-xs font-semibold text-zinc-300 block">
+                  <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-2">
+                    <label className="text-xs font-semibold text-stone-300 block">
                       Método de Extracción
                     </label>
                     <div className="grid grid-cols-2 gap-2">
@@ -1919,12 +1919,12 @@ export default function App() {
                         onClick={() => setBgContiguous(true)}
                         className={`p-2.5 rounded-lg border text-left transition ${
                           bgContiguous
-                            ? 'bg-cyan-500/15 border-cyan-500 text-white'
-                            : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800/50'
+                            ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
                         }`}
                       >
                         <div className="text-xs font-bold">Solo Exterior</div>
-                        <div className="text-[10px] text-zinc-400 mt-0.5">
+                        <div className="text-[10px] text-stone-400 mt-0.5">
                           Protege colores iguales dentro del dibujo
                         </div>
                       </button>
@@ -1932,12 +1932,12 @@ export default function App() {
                         onClick={() => setBgContiguous(false)}
                         className={`p-2.5 rounded-lg border text-left transition ${
                           !bgContiguous
-                            ? 'bg-cyan-500/15 border-cyan-500 text-white'
-                            : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800/50'
+                            ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
                         }`}
                       >
                         <div className="text-xs font-bold">Knockout Total</div>
-                        <div className="text-[10px] text-zinc-400 mt-0.5">
+                        <div className="text-[10px] text-stone-400 mt-0.5">
                           Borra el color en todo el diseño (DTF)
                         </div>
                       </button>
@@ -1945,11 +1945,11 @@ export default function App() {
                   </div>
 
                   {/* Deslizadores de Tolerancia, Suavizado y Contracción */}
-                  <div className="space-y-4 bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5">
+                  <div className="space-y-4 bg-stone-950/90 border border-stone-800 rounded-xl p-3.5">
                     <div>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-zinc-300 font-medium">Tolerancia de Color</span>
-                        <span className="text-cyan-400 font-mono">{bgTolerance}%</span>
+                        <span className="text-stone-300 font-medium">Tolerancia de Color</span>
+                        <span className="text-emerald-400 font-mono">{bgTolerance}%</span>
                       </div>
                       <input
                         type="range"
@@ -1957,14 +1957,14 @@ export default function App() {
                         max="85"
                         value={bgTolerance}
                         onChange={(e) => setBgTolerance(Number(e.target.value))}
-                        className="w-full accent-cyan-400"
+                        className="w-full accent-emerald-400"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-zinc-300 font-medium">Suavizado de Bordes (Antialias)</span>
-                        <span className="text-cyan-400 font-mono">{bgFeather}%</span>
+                        <span className="text-stone-300 font-medium">Suavizado de Bordes (Antialias)</span>
+                        <span className="text-emerald-400 font-mono">{bgFeather}%</span>
                       </div>
                       <input
                         type="range"
@@ -1972,16 +1972,16 @@ export default function App() {
                         max="50"
                         value={bgFeather}
                         onChange={(e) => setBgFeather(Number(e.target.value))}
-                        className="w-full accent-cyan-400"
+                        className="w-full accent-emerald-400"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-zinc-300 font-medium">
+                        <span className="text-stone-300 font-medium">
                           Contracción de Borde (Choke DTF)
                         </span>
-                        <span className="text-cyan-400 font-mono">{bgChoke} px</span>
+                        <span className="text-emerald-400 font-mono">{bgChoke} px</span>
                       </div>
                       <input
                         type="range"
@@ -1989,9 +1989,9 @@ export default function App() {
                         max="4"
                         value={bgChoke}
                         onChange={(e) => setBgChoke(Number(e.target.value))}
-                        className="w-full accent-cyan-400"
+                        className="w-full accent-emerald-400"
                       />
-                      <p className="text-[11px] text-zinc-500 mt-1">
+                      <p className="text-[11px] text-stone-500 mt-1">
                         Contrae ligeramente el borde para evitar que asome un halo del fondo al imprimir base blanca en DTF.
                       </p>
                     </div>
@@ -1999,7 +1999,7 @@ export default function App() {
 
                   <button
                     onClick={() => applyCurrentToolChanges('Recorte de Fondo')}
-                    className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition"
+                    className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
                   >
                     <Check className="w-4 h-4" />
                     <span>Aplicar Recorte de Fondo al Diseño</span>
@@ -2007,10 +2007,10 @@ export default function App() {
                 </>
               ) : (
                 /* Controles de Pincel Manual */
-                <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-4 space-y-4">
+                <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-4 space-y-4">
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-300 font-medium">Tamaño del Pincel</span>
-                    <span className="text-cyan-400 font-mono">{brushSize} px</span>
+                    <span className="text-stone-300 font-medium">Tamaño del Pincel</span>
+                    <span className="text-emerald-400 font-mono">{brushSize} px</span>
                   </div>
                   <input
                     type="range"
@@ -2018,9 +2018,9 @@ export default function App() {
                     max="90"
                     value={brushSize}
                     onChange={(e) => setBrushSize(Number(e.target.value))}
-                    className="w-full accent-cyan-400"
+                    className="w-full accent-emerald-400"
                   />
-                  <p className="text-xs text-zinc-400">
+                  <p className="text-xs text-stone-400">
                     Arrastra el cursor directamente sobre el lienzo para{' '}
                     {bgInteractionMode === 'eraser'
                       ? 'borrar zonas manualmente.'
@@ -2038,17 +2038,17 @@ export default function App() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Grid className="w-4 h-4 text-cyan-400" />
+                  <Grid className="w-4 h-4 text-emerald-400" />
                   Semitonos (Halftone DTF y Serigrafía)
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-stone-400 mt-1">
                   Crea tramas transpirables con tacto suave para DTF o fotolitos de alto contraste para insolar pantallas.
                 </p>
               </div>
 
               {/* Selector de Modo de Semitono */}
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-zinc-300 block">
+                <label className="text-xs font-semibold text-stone-300 block">
                   Modo de Trama
                 </label>
                 {[
@@ -2073,24 +2073,24 @@ export default function App() {
                     onClick={() => setHtMode(m.id)}
                     className={`w-full p-3 rounded-xl border text-left transition ${
                       htMode === m.id
-                        ? 'bg-cyan-500/15 border-cyan-500 text-white'
-                        : 'bg-zinc-950/70 border-zinc-800 text-zinc-400 hover:bg-zinc-800/50'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                        : 'bg-stone-950/70 border-stone-800 text-stone-400 hover:bg-stone-800/50'
                     }`}
                   >
                     <div className="text-xs font-bold">{m.name}</div>
-                    <div className="text-[11px] text-zinc-400 mt-0.5">{m.desc}</div>
+                    <div className="text-[11px] text-stone-400 mt-0.5">{m.desc}</div>
                   </button>
                 ))}
               </div>
 
               {/* Parámetros de Punto, Ángulo y Forma */}
-              <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-4">
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-4">
                 <div>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-zinc-300 font-medium">
+                    <span className="text-stone-300 font-medium">
                       Tamaño de Punto (Simulación LPI)
                     </span>
-                    <span className="text-cyan-400 font-mono">
+                    <span className="text-emerald-400 font-mono">
                       {htDotSize} px (~{Math.round(300 / htDotSize)} LPI)
                     </span>
                   </div>
@@ -2100,9 +2100,9 @@ export default function App() {
                     max="28"
                     value={htDotSize}
                     onChange={(e) => setHtDotSize(Number(e.target.value))}
-                    className="w-full accent-cyan-400"
+                    className="w-full accent-emerald-400"
                   />
-                  <div className="flex justify-between text-[10px] text-zinc-500 mt-0.5">
+                  <div className="flex justify-between text-[10px] text-stone-500 mt-0.5">
                     <span>Fino (Alta definición)</span>
                     <span>Grueso (Efecto Vintage)</span>
                   </div>
@@ -2111,8 +2111,8 @@ export default function App() {
                 {/* Ángulo de trama con accesos rápidos serigráficos */}
                 <div>
                   <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-zinc-300 font-medium">Ángulo de Trama</span>
-                    <span className="text-cyan-400 font-mono">{htAngle}°</span>
+                    <span className="text-stone-300 font-medium">Ángulo de Trama</span>
+                    <span className="text-emerald-400 font-mono">{htAngle}°</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5 mb-2">
                     {[15, 22.5, 45, 75].map((ang) => (
@@ -2121,8 +2121,8 @@ export default function App() {
                         onClick={() => setHtAngle(ang)}
                         className={`py-1 rounded text-xs font-mono border ${
                           htAngle === ang
-                            ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                            : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800'
                         }`}
                       >
                         {ang}°
@@ -2133,7 +2133,7 @@ export default function App() {
 
                 {/* Forma geométrica del punto */}
                 <div>
-                  <label className="text-xs font-medium text-zinc-300 block mb-1.5">
+                  <label className="text-xs font-medium text-stone-300 block mb-1.5">
                     Geometría del Punto
                   </label>
                   <div className="grid grid-cols-4 gap-1.5">
@@ -2148,8 +2148,8 @@ export default function App() {
                         onClick={() => setHtShape(sh.id)}
                         className={`py-1.5 rounded-lg text-xs font-medium border ${
                           htShape === sh.id
-                            ? 'bg-cyan-500 text-zinc-950 border-cyan-400 font-bold'
-                            : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                            ? 'bg-emerald-500 text-stone-950 border-emerald-400 font-bold'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800'
                         }`}
                       >
                         {sh.label}
@@ -2161,10 +2161,10 @@ export default function App() {
                 {htMode === 'dtf-knockout' && (
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-zinc-300 font-medium">
+                      <span className="text-stone-300 font-medium">
                         Profundidad de Knockout en Sombra
                       </span>
-                      <span className="text-cyan-400 font-mono">{htThreshold}%</span>
+                      <span className="text-emerald-400 font-mono">{htThreshold}%</span>
                     </div>
                     <input
                       type="range"
@@ -2172,15 +2172,15 @@ export default function App() {
                       max="90"
                       value={htThreshold}
                       onChange={(e) => setHtThreshold(Number(e.target.value))}
-                      className="w-full accent-cyan-400"
+                      className="w-full accent-emerald-400"
                     />
                   </div>
                 )}
 
                 <div>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-zinc-300 font-medium">Contraste de Trama</span>
-                    <span className="text-cyan-400 font-mono">{htContrast}</span>
+                    <span className="text-stone-300 font-medium">Contraste de Trama</span>
+                    <span className="text-emerald-400 font-mono">{htContrast}</span>
                   </div>
                   <input
                     type="range"
@@ -2188,26 +2188,26 @@ export default function App() {
                     max="100"
                     value={htContrast}
                     onChange={(e) => setHtContrast(Number(e.target.value))}
-                    className="w-full accent-cyan-400"
+                    className="w-full accent-emerald-400"
                   />
                 </div>
 
                 <label className="flex items-center justify-between pt-1 cursor-pointer">
-                  <span className="text-xs text-zinc-300 font-medium">
+                  <span className="text-xs text-stone-300 font-medium">
                     Invertir Trama (Negativo / Prenda Clara)
                   </span>
                   <input
                     type="checkbox"
                     checked={htInvert}
                     onChange={(e) => setHtInvert(e.target.checked)}
-                    className="w-4 h-4 accent-cyan-400 rounded"
+                    className="w-4 h-4 accent-emerald-400 rounded"
                   />
                 </label>
               </div>
 
               <button
                 onClick={() => applyCurrentToolChanges('Efecto Semitono')}
-                className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition"
+                className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
               >
                 <Check className="w-4 h-4" />
                 <span>Aplicar Semitono al Diseño</span>
@@ -2222,21 +2222,21 @@ export default function App() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-cyan-400" />
+                  <Layers className="w-4 h-4 text-emerald-400" />
                   Vectorizar y Separación de Colores
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-stone-400 mt-1">
                   Reduce la imagen a tintas planas para serigrafía, edita cada capa y exporta trazados SVG o fotolitos.
                 </p>
               </div>
 
-              <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-4">
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-4">
                 <div>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-zinc-300 font-medium">
+                    <span className="text-stone-300 font-medium">
                       Número de Colores (Pantallas)
                     </span>
-                    <span className="text-cyan-400 font-mono font-bold">
+                    <span className="text-emerald-400 font-mono font-bold">
                       {vecNumColors} tintas
                     </span>
                   </div>
@@ -2246,16 +2246,16 @@ export default function App() {
                     max="10"
                     value={vecNumColors}
                     onChange={(e) => setVecNumColors(Number(e.target.value))}
-                    className="w-full accent-cyan-400"
+                    className="w-full accent-emerald-400"
                   />
                 </div>
 
                 <div>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-zinc-300 font-medium">
+                    <span className="text-stone-300 font-medium">
                       Limpieza de Ruido / Suavizado
                     </span>
-                    <span className="text-cyan-400 font-mono">Nivel {vecSmoothness}</span>
+                    <span className="text-emerald-400 font-mono">Nivel {vecSmoothness}</span>
                   </div>
                   <input
                     type="range"
@@ -2263,28 +2263,28 @@ export default function App() {
                     max="3"
                     value={vecSmoothness}
                     onChange={(e) => setVecSmoothness(Number(e.target.value))}
-                    className="w-full accent-cyan-400"
+                    className="w-full accent-emerald-400"
                   />
                 </div>
 
-                <label className="flex items-center justify-between text-xs text-zinc-300 cursor-pointer">
+                <label className="flex items-center justify-between text-xs text-stone-300 cursor-pointer">
                   <span>Incluir Marcas de Registro Serigráficas</span>
                   <input
                     type="checkbox"
                     checked={vecRegMarks}
                     onChange={(e) => setVecRegMarks(e.target.checked)}
-                    className="w-4 h-4 accent-cyan-400"
+                    className="w-4 h-4 accent-emerald-400"
                   />
                 </label>
               </div>
 
               {/* Lista interactiva de capas / pantallas de color */}
-              <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-2.5">
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-zinc-200">
+                  <span className="text-xs font-bold text-stone-200">
                     Capas de Tinta Detectadas ({vecLayers.length})
                   </span>
-                  <span className="text-[10px] text-zinc-400">
+                  <span className="text-[10px] text-stone-400">
                     Clic en color para editarlo
                   </span>
                 </div>
@@ -2293,7 +2293,7 @@ export default function App() {
                   {vecLayers.map((layer, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 px-2.5 py-2 rounded-lg"
+                      className="flex items-center justify-between gap-2 bg-stone-900 border border-stone-800 px-2.5 py-2 rounded-lg"
                     >
                       <div className="flex items-center gap-2.5">
                         <input
@@ -2307,10 +2307,10 @@ export default function App() {
                           className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
                         />
                         <div>
-                          <div className="text-xs font-mono font-bold text-zinc-200 uppercase">
+                          <div className="text-xs font-mono font-bold text-stone-200 uppercase">
                             Pantalla #{idx + 1} • {layer.hex}
                           </div>
-                          <div className="text-[10px] text-zinc-400">
+                          <div className="text-[10px] text-stone-400">
                             Cobertura: {layer.percentage}% del área
                           </div>
                         </div>
@@ -2326,8 +2326,8 @@ export default function App() {
                           title={layer.visible ? 'Ocultar capa' : 'Mostrar capa'}
                           className={`p-1.5 rounded-md border text-xs transition ${
                             layer.visible
-                              ? 'bg-zinc-800 border-zinc-700 text-cyan-400'
-                              : 'bg-zinc-950 border-zinc-800 text-zinc-600'
+                              ? 'bg-stone-800 border-stone-700 text-emerald-400'
+                              : 'bg-stone-950 border-stone-800 text-stone-600'
                           }`}
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -2335,7 +2335,7 @@ export default function App() {
                         <button
                           onClick={() => downloadSingleColorPositive(idx, layer.hex)}
                           title="Descargar fotolito negro para quemar esta pantalla"
-                          className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[10px] font-semibold text-zinc-200 border border-zinc-700"
+                          className="px-2 py-1 rounded-md bg-stone-800 hover:bg-stone-700 text-[10px] font-semibold text-stone-200 border border-stone-700"
                         >
                           Fotolito
                         </button>
@@ -2348,14 +2348,14 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => applyCurrentToolChanges('Posterizado Vectorial')}
-                  className="py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-700 transition"
+                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 border border-stone-700 transition"
                 >
-                  <Check className="w-4 h-4 text-cyan-400" />
+                  <Check className="w-4 h-4 text-emerald-400" />
                   <span>Fijar en Lienzo</span>
                 </button>
                 <button
                   onClick={downloadVectorSVG}
-                  className="py-2.5 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20 transition"
+                  className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition"
                 >
                   <FileCode className="w-4 h-4" />
                   <span>Descargar .SVG</span>
@@ -2371,17 +2371,17 @@ export default function App() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Maximize2 className="w-4 h-4 text-cyan-400" />
+                  <Maximize2 className="w-4 h-4 text-emerald-400" />
                   Tamaño de Impresión, DPI y Espejo
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-stone-400 mt-1">
                   Configura las medidas físicas exactas en centímetros o pulgadas a 300 DPI para tu plóter DTF o impresora de sublimación.
                 </p>
               </div>
 
               {/* Formatos Estándar Rápidos */}
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-zinc-300 block">
+                <label className="text-xs font-semibold text-stone-300 block">
                   Formatos Textiles y Hojas Estándar
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -2400,10 +2400,10 @@ export default function App() {
                         setPrintWidthCm(preset.w);
                         setPrintHeightCm(preset.h);
                       }}
-                      className="p-2 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-left transition"
+                      className="p-2 rounded-lg bg-stone-950 hover:bg-stone-800 border border-stone-800 text-left transition"
                     >
-                      <div className="text-xs font-bold text-zinc-200">{preset.name}</div>
-                      <div className="text-[10px] text-cyan-400 font-mono">
+                      <div className="text-xs font-bold text-stone-200">{preset.name}</div>
+                      <div className="text-[10px] text-emerald-400 font-mono">
                         {preset.w} × {preset.h} cm
                       </div>
                     </button>
@@ -2412,14 +2412,14 @@ export default function App() {
               </div>
 
               {/* Calculadora física de Dimensiones y DPI */}
-              <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-3.5">
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-300">Unidad de Medida</span>
-                  <div className="flex bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
+                  <span className="text-xs font-semibold text-stone-300">Unidad de Medida</span>
+                  <div className="flex bg-stone-900 p-0.5 rounded-lg border border-stone-800">
                     <button
                       onClick={() => setPrintUnit('cm')}
                       className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                        printUnit === 'cm' ? 'bg-cyan-500 text-zinc-950' : 'text-zinc-400'
+                        printUnit === 'cm' ? 'bg-emerald-500 text-stone-950' : 'text-stone-400'
                       }`}
                     >
                       cm
@@ -2427,7 +2427,7 @@ export default function App() {
                     <button
                       onClick={() => setPrintUnit('in')}
                       className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                        printUnit === 'in' ? 'bg-cyan-500 text-zinc-950' : 'text-zinc-400'
+                        printUnit === 'in' ? 'bg-emerald-500 text-stone-950' : 'text-stone-400'
                       }`}
                     >
                       pulgadas
@@ -2437,7 +2437,7 @@ export default function App() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] text-zinc-400 block mb-1">
+                    <label className="text-[11px] text-stone-400 block mb-1">
                       Ancho ({printUnit})
                     </label>
                     <input
@@ -2454,11 +2454,11 @@ export default function App() {
                           setPrintHeightCm(Number((val * ratio).toFixed(1)));
                         }
                       }}
-                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
+                      className="w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-zinc-400 block mb-1">
+                    <label className="text-[11px] text-stone-400 block mb-1">
                       Alto ({printUnit})
                     </label>
                     <input
@@ -2475,23 +2475,23 @@ export default function App() {
                           setPrintWidthCm(Number((val * ratio).toFixed(1)));
                         }
                       }}
-                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
+                      className="w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
                     />
                   </div>
                 </div>
 
-                <label className="flex items-center justify-between text-xs text-zinc-300 cursor-pointer">
+                <label className="flex items-center justify-between text-xs text-stone-300 cursor-pointer">
                   <span>Mantener proporción original</span>
                   <input
                     type="checkbox"
                     checked={lockAspect}
                     onChange={(e) => setLockAspect(e.target.checked)}
-                    className="w-4 h-4 accent-cyan-400"
+                    className="w-4 h-4 accent-emerald-400"
                   />
                 </label>
 
                 <div>
-                  <label className="text-xs font-medium text-zinc-300 block mb-1.5">
+                  <label className="text-xs font-medium text-stone-300 block mb-1.5">
                     Resolución de Salida (PPP / DPI)
                   </label>
                   <div className="grid grid-cols-3 gap-1.5">
@@ -2501,8 +2501,8 @@ export default function App() {
                         onClick={() => setPrintDpi(dpi)}
                         className={`py-1.5 rounded-lg text-xs font-mono border ${
                           printDpi === dpi
-                            ? 'bg-cyan-500 text-zinc-950 font-bold border-cyan-400'
-                            : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                            ? 'bg-emerald-500 text-stone-950 font-bold border-emerald-400'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800'
                         }`}
                       >
                         {dpi} DPI
@@ -2511,8 +2511,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-lg p-2.5 text-xs flex items-center justify-between">
-                  <span className="text-zinc-400">Resolución final en píxeles:</span>
+                <div className="bg-stone-900/90 border border-stone-800 rounded-lg p-2.5 text-xs flex items-center justify-between">
+                  <span className="text-stone-400">Resolución final en píxeles:</span>
                   <span className="font-mono font-bold text-emerald-400">
                     {targetPixelsWidth} × {targetPixelsHeight} px
                   </span>
@@ -2520,7 +2520,7 @@ export default function App() {
               </div>
 
               {/* Modo Espejo para Sublimación y DTF */}
-              <div className="bg-zinc-950/90 border border-zinc-800 rounded-xl p-3.5 space-y-3">
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-3">
                 <label className="flex items-center justify-between cursor-pointer">
                   <div className="flex items-center gap-2.5">
                     <FlipHorizontal className="w-4 h-4 text-amber-400" />
@@ -2528,7 +2528,7 @@ export default function App() {
                       <div className="text-xs font-bold text-white">
                         Voltear en Modo Espejo
                       </div>
-                      <div className="text-[11px] text-zinc-400">
+                      <div className="text-[11px] text-stone-400">
                         Indispensable para Sublimación y film DTF
                       </div>
                     </div>
@@ -2541,12 +2541,12 @@ export default function App() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-zinc-800">
+                <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-stone-800">
                   <div>
                     <div className="text-xs font-bold text-white">
                       Suavizado Bicúbico de Alta Nitidez
                     </div>
-                    <div className="text-[11px] text-zinc-400">
+                    <div className="text-[11px] text-stone-400">
                       Evita bordes pixelados al ampliar el diseño
                     </div>
                   </div>
@@ -2554,7 +2554,7 @@ export default function App() {
                     type="checkbox"
                     checked={sharpenFilter}
                     onChange={(e) => setSharpenFilter(e.target.checked)}
-                    className="w-4 h-4 accent-cyan-400"
+                    className="w-4 h-4 accent-emerald-400"
                   />
                 </label>
               </div>
@@ -2568,55 +2568,55 @@ export default function App() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Download className="w-4 h-4 text-cyan-400" />
+                  <Download className="w-4 h-4 text-emerald-400" />
                   Centro de Exportación para Producción
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-stone-400 mt-1">
                   Descarga tus archivos finales listos para RIP de impresión DTF, impresora de sublimación o filmadora de fotolitos.
                 </p>
               </div>
 
               {/* Resumen de Especificaciones */}
-              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-2.5 text-xs">
-                <div className="font-bold text-zinc-200 border-b border-zinc-800 pb-2">
+              <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-2.5 text-xs">
+                <div className="font-bold text-stone-200 border-b border-stone-800 pb-2">
                   Ficha Técnica de Salida
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Tamaño físico:</span>
+                  <span className="text-stone-400">Tamaño físico:</span>
                   <span className="font-mono text-white font-semibold">
                     {printWidthCm} × {printHeightCm} {printUnit}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Resolución:</span>
-                  <span className="font-mono text-cyan-400 font-semibold">
+                  <span className="text-stone-400">Resolución:</span>
+                  <span className="font-mono text-emerald-400 font-semibold">
                     {printDpi} PPP / DPI ({targetPixelsWidth}×{targetPixelsHeight} px)
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Orientación:</span>
+                  <span className="text-stone-400">Orientación:</span>
                   <span className="font-semibold text-amber-300">
                     {mirrorMode ? 'En Espejo (Sublimación / DTF)' : 'Normal (Lectura Directa)'}
                   </span>
                 </div>
 
-                <div className="pt-2 border-t border-zinc-800 space-y-2">
+                <div className="pt-2 border-t border-stone-800 space-y-2">
                   <label className="flex items-center justify-between cursor-pointer">
-                    <span className="text-zinc-300">Activar Modo Espejo</span>
+                    <span className="text-stone-300">Activar Modo Espejo</span>
                     <input
                       type="checkbox"
                       checked={mirrorMode}
                       onChange={(e) => setMirrorMode(e.target.checked)}
-                      className="w-4 h-4 accent-cyan-400"
+                      className="w-4 h-4 accent-emerald-400"
                     />
                   </label>
                   <label className="flex items-center justify-between cursor-pointer">
-                    <span className="text-zinc-300">Añadir Marcas de Registro (Serigrafía)</span>
+                    <span className="text-stone-300">Añadir Marcas de Registro (Serigrafía)</span>
                     <input
                       type="checkbox"
                       checked={exportRegMarks}
                       onChange={(e) => setExportRegMarks(e.target.checked)}
-                      className="w-4 h-4 accent-cyan-400"
+                      className="w-4 h-4 accent-emerald-400"
                     />
                   </label>
                 </div>
@@ -2626,7 +2626,7 @@ export default function App() {
               <div className="space-y-2.5">
                 <button
                   onClick={downloadHighResPNG}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-zinc-950 font-bold text-xs flex items-center justify-between shadow-lg shadow-cyan-500/20 transition"
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-stone-950 font-bold text-xs flex items-center justify-between shadow-lg shadow-emerald-500/20 transition"
                 >
                   <div className="flex items-center gap-2.5">
                     <FileImage className="w-5 h-5" />
@@ -2642,27 +2642,27 @@ export default function App() {
 
                 <button
                   onClick={downloadVectorSVG}
-                  className="w-full py-3.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs flex items-center justify-between border border-zinc-700 transition"
+                  className="w-full py-3.5 px-4 rounded-xl bg-stone-800 hover:bg-stone-700 text-white font-bold text-xs flex items-center justify-between border border-stone-700 transition"
                 >
                   <div className="flex items-center gap-2.5">
-                    <FileCode className="w-5 h-5 text-fuchsia-400" />
+                    <FileCode className="w-5 h-5 text-emerald-400" />
                     <div className="text-left">
                       <div>Descargar Vector .SVG por Capas</div>
-                      <div className="text-[10px] text-zinc-400 font-normal">
+                      <div className="text-[10px] text-stone-400 font-normal">
                         Ideal para Illustrator, CorelDRAW, Vinilo Textil y Serigrafía
                       </div>
                     </div>
                   </div>
-                  <Download className="w-4 h-4 text-zinc-400" />
+                  <Download className="w-4 h-4 text-stone-400" />
                 </button>
               </div>
             </div>
           )}
 
           {/* Pie de panel derecho: Guía rápida profesional */}
-          <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3.5 text-[11px] text-zinc-400 space-y-1.5">
-            <div className="font-bold text-zinc-200 flex items-center gap-1.5">
-              <Info className="w-3.5 h-3.5 text-cyan-400" />
+          <div className="bg-stone-950/70 border border-stone-800/80 rounded-xl p-3.5 text-[11px] text-stone-400 space-y-1.5">
+            <div className="font-bold text-stone-200 flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-emerald-400" />
               <span>Recomendación de Taller</span>
             </div>
             <p className="leading-relaxed">
