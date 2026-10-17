@@ -1393,7 +1393,7 @@ export default function App() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-bold text-base lg:text-lg tracking-tight text-white">
-                AmazoniaInk <span className="text-cyan-400">Pro</span>
+                AmazoniaInk <span className="text-green-950 bg-white rounded-md p-1">Pro</span>
               </h1>
               <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
                 DTF • Sublimación • Serigrafía
