@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-Abre en el navegador la dirección local que muestra Vite (normalmente `http://localhost:5173/`).
+Abre en el navegador la dirección local que muestra Vite (normalmente `http://localhost:5173/`). No abras `index.html` con Live Server: el proyecto usa React y JSX, que necesitan el servidor de desarrollo de Vite para compilarse.
 
 Para generar una compilación de producción:
 

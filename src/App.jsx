@@ -489,12 +489,18 @@ export default function App() {
   // 2. ESTADO: SEMITONOS (HALFTONE DTF & SERIGRAFÍA)
   // --------------------------------------------------------------------------
   const [htMode, setHtMode] = useState('dtf-knockout'); // 'dtf-knockout' | 'mono' | 'cmyk'
-  const [htDotSize, setHtDotSize] = useState(10); // Tamaño de celda en px (equivale a LPI)
+  const [htMethod, setHtMethod] = useState('halftone'); // 'halftone' | 'diffusion'
+  const [htFrequency, setHtFrequency] = useState(30);
   const [htAngle, setHtAngle] = useState(22.5); // 22.5° o 45° clásico en serigrafía/DTF
   const [htShape, setHtShape] = useState('circle'); // 'circle' | 'diamond' | 'line' | 'cross'
   const [htContrast, setHtContrast] = useState(25);
   const [htThreshold, setHtThreshold] = useState(48); // Sensibilidad del knockout de sombra DTF
   const [htInvert, setHtInvert] = useState(false);
+  const [htRemoveBlackEdges, setHtRemoveBlackEdges] = useState(true);
+  const [htCropThreshold, setHtCropThreshold] = useState(25);
+  const [htBlackPoint, setHtBlackPoint] = useState(0);
+  const [htWhitePoint, setHtWhitePoint] = useState(255);
+  const [htGamma, setHtGamma] = useState(1);
 
   // --------------------------------------------------------------------------
   // 3. ESTADO: VECTORIZAR Y SEPARACIÓN DE COLORES
@@ -758,16 +764,24 @@ export default function App() {
     const out = new ImageData(w, h);
     const dst = out.data;
 
-    const cellSize = Math.max(4, htDotSize);
+    const cellSize = Math.max(3, 300 / htFrequency);
     const rad = (htAngle * Math.PI) / 180;
     const cosA = Math.cos(rad);
     const sinA = Math.sin(rad);
     const contrastFactor = (259 * (htContrast + 255)) / (255 * (259 - htContrast));
+    const blackPoint = Math.min(htBlackPoint, htWhitePoint - 1);
+    const whitePoint = Math.max(blackPoint + 1, htWhitePoint);
+    const gamma = Math.max(0.1, htGamma);
+    const adjustedChannels = new Uint8ClampedArray(w * h * 3);
+    const removedBackground = htRemoveBlackEdges ? new Uint8Array(w * h) : null;
+    const diffusionValues = htMethod === 'diffusion' && htMode !== 'cmyk'
+      ? new Float32Array(w * h)
+      : null;
 
     // Función matemática de forma de trama (Spot Function)
     const evaluateSpot = (u, v, radiusRatio) => {
       // u, v están normalizados entre -1 y 1 dentro de la celda de semitono
-      if (htShape === 'circle') {
+      if (htShape === 'circle' || htShape === 'round') {
         const dist = Math.sqrt(u * u + v * v);
         return dist <= radiusRatio * 1.35;
       } else if (htShape === 'diamond') {
@@ -781,20 +795,104 @@ export default function App() {
       }
     };
 
+    const adjustChannel = (value) => {
+      const normalized = Math.max(0, Math.min(1, (value - blackPoint) / (whitePoint - blackPoint)));
+      const leveled = Math.pow(normalized, 1 / gamma) * 255;
+      return Math.max(0, Math.min(255, contrastFactor * (leveled - 128) + 128));
+    };
+
+    if (htRemoveBlackEdges) {
+      const visited = new Uint8Array(w * h);
+      const queue = new Int32Array(w * h);
+      let head = 0;
+      let tail = 0;
+      const isEdgeBackground = (pixel) => {
+        const idx = pixel * 4;
+        return src[idx + 3] > 15 &&
+          src[idx] <= htCropThreshold &&
+          src[idx + 1] <= htCropThreshold &&
+          src[idx + 2] <= htCropThreshold;
+      };
+      const enqueueBackground = (x, y) => {
+        const pixel = y * w + x;
+        if (!visited[pixel] && isEdgeBackground(pixel)) {
+          visited[pixel] = 1;
+          queue[tail++] = pixel;
+        }
+      };
+
+      for (let x = 0; x < w; x++) {
+        enqueueBackground(x, 0);
+        enqueueBackground(x, h - 1);
+      }
+      for (let y = 0; y < h; y++) {
+        enqueueBackground(0, y);
+        enqueueBackground(w - 1, y);
+      }
+
+      while (head < tail) {
+        const pixel = queue[head++];
+        const x = pixel % w;
+        const y = Math.floor(pixel / w);
+        removedBackground[pixel] = 1;
+        if (x > 0) enqueueBackground(x - 1, y);
+        if (x + 1 < w) enqueueBackground(x + 1, y);
+        if (y > 0) enqueueBackground(x, y - 1);
+        if (y + 1 < h) enqueueBackground(x, y + 1);
+      }
+    }
+
+    for (let pixel = 0; pixel < w * h; pixel++) {
+      const idx = pixel * 4;
+      const r = adjustChannel(src[idx]);
+      const g = adjustChannel(src[idx + 1]);
+      const b = adjustChannel(src[idx + 2]);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      adjustedChannels[pixel * 3] = r;
+      adjustedChannels[pixel * 3 + 1] = g;
+      adjustedChannels[pixel * 3 + 2] = b;
+      if (diffusionValues && src[idx + 3] > 15 && !removedBackground?.[pixel]) {
+        if (htMode === 'mono') {
+          diffusionValues[pixel] = (htInvert ? lum : 1 - lum) * (src[idx + 3] / 255);
+        } else {
+          const effectiveLum = htInvert ? 1 - lum : lum;
+          const combined = effectiveLum * (src[idx + 3] / 255);
+          const cutoff = htThreshold / 100;
+          diffusionValues[pixel] = combined > cutoff + 0.35
+            ? 1
+            : Math.max(0, Math.min(1, combined / (cutoff + 0.35)));
+        }
+      }
+    }
+
+    const diffusePixel = (pixel, tone, ink) => {
+      if (!diffusionValues) return;
+      const error = tone - (ink ? 1 : 0);
+      const x = pixel % w;
+      const y = Math.floor(pixel / w);
+      const distribute = (nx, ny, weight) => {
+        if (nx < 0 || nx >= w || ny >= h) return;
+        const neighbor = ny * w + nx;
+        if (src[neighbor * 4 + 3] > 15 && !removedBackground?.[neighbor]) {
+          diffusionValues[neighbor] += error * weight;
+        }
+      };
+      distribute(x + 1, y, 7 / 16);
+      distribute(x - 1, y + 1, 3 / 16);
+      distribute(x, y + 1, 5 / 16);
+      distribute(x + 1, y + 1, 1 / 16);
+    };
+
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const idx = (y * w + x) * 4;
+        const pixel = y * w + x;
+        const idx = pixel * 4;
         const alpha = src[idx + 3];
-        if (alpha < 15) continue;
+        if (alpha < 15 || removedBackground?.[pixel]) continue;
 
-        let r = src[idx];
-        let g = src[idx + 1];
-        let b = src[idx + 2];
-
-        // Aplicar ajuste de contraste
-        r = Math.max(0, Math.min(255, contrastFactor * (r - 128) + 128));
-        g = Math.max(0, Math.min(255, contrastFactor * (g - 128) + 128));
-        b = Math.max(0, Math.min(255, contrastFactor * (b - 128) + 128));
+        const r = adjustedChannels[pixel * 3];
+        const g = adjustedChannels[pixel * 3 + 1];
+        const b = adjustedChannels[pixel * 3 + 2];
 
         const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255; // 0 (negro) a 1 (blanco)
 
@@ -823,7 +921,10 @@ export default function App() {
           } else {
             // Zona de transición a sombra -> Semitono transparente
             const dotCoverage = Math.max(0, Math.min(1, combined / (cutoff + 0.35)));
-            if (evaluateSpot(cellU, cellV, dotCoverage)) {
+            const isDot = diffusionValues
+              ? diffusionValues[pixel] >= 0.5
+              : evaluateSpot(cellU, cellV, dotCoverage);
+            if (isDot) {
               dst[idx] = src[idx];
               dst[idx + 1] = src[idx + 1];
               dst[idx + 2] = src[idx + 2];
@@ -831,11 +932,16 @@ export default function App() {
             } else {
               dst[idx + 3] = 0; // El color de la prenda respira aquí
             }
+            diffusePixel(pixel, diffusionValues ? diffusionValues[pixel] : dotCoverage, isDot);
           }
         } else if (htMode === 'mono') {
           // MODO FOTOLITO MONOCROMO PARA SERIGRAFÍA
           const darkness = htInvert ? lum : 1 - lum;
-          const isInk = evaluateSpot(cellU, cellV, darkness * (alpha / 255));
+          const tone = darkness * (alpha / 255);
+          const isInk = diffusionValues
+            ? diffusionValues[pixel] >= 0.5
+            : evaluateSpot(cellU, cellV, tone);
+          diffusePixel(pixel, diffusionValues ? diffusionValues[pixel] : tone, isInk);
           if (isInk) {
             dst[idx] = 15;
             dst[idx + 1] = 15;
@@ -883,7 +989,10 @@ export default function App() {
       }
     }
     return out;
-  }, [htMode, htDotSize, htAngle, htShape, htContrast, htThreshold, htInvert]);
+  }, [
+    htMode, htMethod, htFrequency, htAngle, htShape, htContrast, htThreshold,
+    htInvert, htRemoveBlackEdges, htCropThreshold, htBlackPoint, htWhitePoint, htGamma
+  ]);
 
   // ==========================================================================
   // MOTOR 3: VECTORIZADOR Y SEPARACIÓN DE COLORES PLANOS (K-MEANS + SVG)
@@ -1234,6 +1343,23 @@ export default function App() {
     if (!previewBufferRef.current) return;
     pushToHistory(previewBufferRef.current, label);
     showToast(`¡${label} aplicado al diseño! Puedes seguir editando en otros pasos.`);
+  };
+
+  const downloadHalftonePNG = () => {
+    if (!currentBaseImageData) return;
+    const halftoneData = computeHalftone(currentBaseImageData);
+    if (!halftoneData) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = halftoneData.width;
+    canvas.height = halftoneData.height;
+    canvas.getContext('2d').putImageData(halftoneData, 0, 0);
+
+    const link = document.createElement('a');
+    link.download = `${activePresetName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_semitono.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showToast('PNG transparente de semitono descargado');
   };
 
   // ==========================================================================
@@ -2070,7 +2196,10 @@ export default function App() {
                 ].map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => setHtMode(m.id)}
+                    onClick={() => {
+                      setHtMode(m.id);
+                      if (m.id === 'cmyk') setHtMethod('halftone');
+                    }}
                     className={`w-full p-3 rounded-xl border text-left transition ${
                       htMode === m.id
                         ? 'bg-emerald-500/15 border-emerald-500 text-white'
@@ -2083,28 +2212,164 @@ export default function App() {
                 ))}
               </div>
 
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-3">
+                <label className="flex items-center justify-between gap-3 cursor-pointer">
+                  <span className="text-xs font-medium text-stone-200">Eliminar fondo negro conectado al borde</span>
+                  <input
+                    type="checkbox"
+                    checked={htRemoveBlackEdges}
+                    onChange={(e) => setHtRemoveBlackEdges(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-400 rounded"
+                  />
+                </label>
+                <p className="text-[11px] text-stone-500">
+                  Convierte solo los píxeles casi negros que tocan el borde en transparencia; conserva el negro dentro del diseño.
+                </p>
+                {htRemoveBlackEdges && (
+                  <div>
+                    <div className="flex justify-between text-[11px] mb-1">
+                      <label className="text-stone-400">Umbral del negro</label>
+                      <span className="text-emerald-400 font-mono">{htCropThreshold}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={htCropThreshold}
+                      onChange={(e) => setHtCropThreshold(Number(e.target.value))}
+                      className="w-full accent-emerald-400"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-200">Curva tonal (niveles)</span>
+                  <button
+                    onClick={() => {
+                      setHtBlackPoint(0);
+                      setHtWhitePoint(255);
+                      setHtGamma(1);
+                    }}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300"
+                  >
+                    Restablecer niveles
+                  </button>
+                </div>
+                {[
+                  {
+                    label: 'Punto negro',
+                    value: htBlackPoint,
+                    min: 0,
+                    max: 254,
+                    step: 1,
+                    setValue: (value) => {
+                      setHtBlackPoint(value);
+                      if (value >= htWhitePoint) setHtWhitePoint(Math.min(255, value + 1));
+                    }
+                  },
+                  {
+                    label: 'Punto blanco',
+                    value: htWhitePoint,
+                    min: 1,
+                    max: 255,
+                    step: 1,
+                    setValue: (value) => {
+                      setHtWhitePoint(value);
+                      if (value <= htBlackPoint) setHtBlackPoint(Math.max(0, value - 1));
+                    }
+                  }
+                ].map((control) => (
+                  <div key={control.label}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <label className="text-stone-300">{control.label}</label>
+                      <span className="text-emerald-400 font-mono">{control.value}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={control.min}
+                      max={control.max}
+                      value={control.value}
+                      onChange={(e) => control.setValue(Number(e.target.value))}
+                      className="w-full accent-emerald-400"
+                    />
+                  </div>
+                ))}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <label className="text-stone-300">Gamma</label>
+                    <span className="text-emerald-400 font-mono">{htGamma.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="3"
+                    step="0.1"
+                    value={htGamma}
+                    onChange={(e) => setHtGamma(Number(e.target.value))}
+                    className="w-full accent-emerald-400"
+                  />
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  Ajusta el punto negro, el blanco y los medios tonos antes de generar la trama.
+                </p>
+              </div>
+
               {/* Parámetros de Punto, Ángulo y Forma */}
               <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-4">
+                <fieldset>
+                  <legend className="text-xs font-medium text-stone-300 mb-1.5">Método de tramado</legend>
+                  <p className="text-[11px] text-stone-500 mb-2">
+                    La trama clásica genera puntos geométricos; la difusión Floyd–Steinberg crea una textura orgánica.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'halftone', label: 'Puntos clásicos' },
+                      { id: 'diffusion', label: 'Difusión' }
+                    ].map((method) => (
+                      <button
+                        key={method.id}
+                        type="button"
+                        disabled={htMode === 'cmyk' && method.id === 'diffusion'}
+                        onClick={() => setHtMethod(method.id)}
+                        className={`py-2 rounded-lg border text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                          htMethod === method.id
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800'
+                        }`}
+                      >
+                        {method.label}
+                      </button>
+                    ))}
+                  </div>
+                  {htMode === 'cmyk' && htMethod === 'diffusion' && (
+                    <p className="text-[11px] text-amber-300 mt-2">
+                      La difusión no está disponible en CMYK; cambia al método de puntos clásicos para ver el resultado.
+                    </p>
+                  )}
+                </fieldset>
+
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-stone-300 font-medium">
-                      Tamaño de Punto (Simulación LPI)
+                      Frecuencia de Trama
                     </span>
                     <span className="text-emerald-400 font-mono">
-                      {htDotSize} px (~{Math.round(300 / htDotSize)} LPI)
+                      {htFrequency} LPI (~{(300 / htFrequency).toFixed(1)} px)
                     </span>
                   </div>
                   <input
                     type="range"
-                    min="4"
-                    max="28"
-                    value={htDotSize}
-                    onChange={(e) => setHtDotSize(Number(e.target.value))}
+                    min="5"
+                    max="100"
+                    value={htFrequency}
+                    onChange={(e) => setHtFrequency(Number(e.target.value))}
                     className="w-full accent-emerald-400"
                   />
                   <div className="flex justify-between text-[10px] text-stone-500 mt-0.5">
-                    <span>Fino (Alta definición)</span>
-                    <span>Grueso (Efecto Vintage)</span>
+                    <span>5 LPI • puntos grandes</span>
+                    <span>100 LPI • detalle fino</span>
                   </div>
                 </div>
 
@@ -2129,6 +2394,15 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="90"
+                    step="0.5"
+                    value={htAngle}
+                    onChange={(e) => setHtAngle(Number(e.target.value))}
+                    className="w-full accent-emerald-400"
+                  />
                 </div>
 
                 {/* Forma geométrica del punto */}
@@ -2205,6 +2479,13 @@ export default function App() {
                 </label>
               </div>
 
+              <button
+                onClick={downloadHalftonePNG}
+                className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-semibold text-xs flex items-center justify-center gap-2 border border-stone-700 transition"
+              >
+                <Download className="w-4 h-4" />
+                <span>Descargar PNG transparente</span>
+              </button>
               <button
                 onClick={() => applyCurrentToolChanges('Efecto Semitono')}
                 className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
