@@ -11,6 +11,7 @@ import { addPngPhysicalResolutionToBlob, calculateEffectiveDpi, calculateRasterS
 import GangSheet from './GangSheet.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
 import { getProject, saveProject } from './utils/projectStore.js';
+import { removeBackground } from './utils/backgroundRemoval.js';
 
 // ============================================================================
 // GENERADORES DE GRÁFICOS DE PRUEBA (PROCEDURAL ARTWORK)
@@ -585,6 +586,7 @@ export default function App() {
   const loadSamplePreset = useCallback((type, title) => {
     const sampleCanvas = generateSampleArtwork(type);
     const ctx = sampleCanvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
     const r = imgData.data[0];
     const g = imgData.data[1];
     const b = imgData.data[2];
@@ -657,8 +659,20 @@ export default function App() {
       context.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
       const imageData = context.getImageData(0, 0, width, height);
-      if (imageData.data[3] > 200) {
-        setBgTargetColor(rgbToHex(imageData.data[0], imageData.data[1], imageData.data[2]));
+      // Detectar color de fondo buscando entre las 4 esquinas una opaca
+      const corners = [
+        0,
+        (width - 1) * 4,
+        (height - 1) * width * 4,
+        ((height - 1) * width + (width - 1)) * 4
+      ];
+      const opaqueCorner = corners.find(idx => imageData.data[idx + 3] > 180);
+      if (opaqueCorner !== undefined) {
+        setBgTargetColor(rgbToHex(
+          imageData.data[opaqueCorner],
+          imageData.data[opaqueCorner + 1],
+          imageData.data[opaqueCorner + 2]
+        ));
       }
       setHistory([{ imageData, label: file.name }]);
       setHistoryIndex(0);
@@ -667,6 +681,8 @@ export default function App() {
       setSourceOriginalFile(file);
       setActivePresetName(file.name);
       setSavedProjectName(file.name);
+      setActiveTab('bg');
+      setBgInteractionMode('picker');
       const ratio = height / width;
       setPrintUnit('cm');
       setPrintWidthCm(25);
@@ -821,117 +837,13 @@ export default function App() {
   // MOTOR 1: ALGORITMO DE QUITAR FONDO (FLOOD FILL / KNOCKOUT + CHOKE DTF)
   // ==========================================================================
   const computeBackgroundRemoval = useCallback((baseData) => {
-    if (!baseData) return null;
-    const w = baseData.width;
-    const h = baseData.height;
-    const src = baseData.data;
-    const out = new ImageData(new Uint8ClampedArray(src), w, h);
-    const dst = out.data;
-
-    const target = hexToRgb(bgTargetColor);
-    const maxDist = (bgTolerance / 100) * 441.67; // 441.67 es la distancia máxima en RGB
-    const featherDist = (bgFeather / 100) * 441.67;
-
-    const colorDistance = (idx) => {
-      const dr = src[idx] - target.r;
-      const dg = src[idx + 1] - target.g;
-      const db = src[idx + 2] - target.b;
-      return Math.sqrt(dr * dr + dg * dg + db * db);
-    };
-
-    if (bgContiguous) {
-      // Flood Fill inteligente desde los 4 bordes exteriores del lienzo
-      const visited = new Uint8Array(w * h);
-      const queue = new Int32Array(w * h);
-      let head = 0;
-      let tail = 0;
-
-      const tryEnqueue = (x, y) => {
-        const p = y * w + x;
-        if (visited[p]) return;
-        const dist = colorDistance(p * 4);
-        if (dist <= maxDist + featherDist) {
-          visited[p] = 1;
-          queue[tail++] = p;
-        }
-      };
-
-      for (let x = 0; x < w; x++) {
-        tryEnqueue(x, 0);
-        tryEnqueue(x, h - 1);
-      }
-      for (let y = 0; y < h; y++) {
-        tryEnqueue(0, y);
-        tryEnqueue(w - 1, y);
-      }
-
-      while (head < tail) {
-        const p = queue[head++];
-        const idx = p * 4;
-        const dist = colorDistance(idx);
-
-        if (dist <= maxDist) {
-          dst[idx + 3] = 0;
-        } else if (featherDist > 0 && dist <= maxDist + featherDist) {
-          const factor = (dist - maxDist) / featherDist;
-          dst[idx + 3] = Math.min(dst[idx + 3], Math.round(src[idx + 3] * factor));
-        }
-
-        // Expandir solo si está dentro del umbral principal
-        if (dist <= maxDist) {
-          const x = p % w;
-          const y = (p / w) | 0;
-          if (x > 0) tryEnqueue(x - 1, y);
-          if (x < w - 1) tryEnqueue(x + 1, y);
-          if (y > 0) tryEnqueue(x, y - 1);
-          if (y < h - 1) tryEnqueue(x, y + 1);
-        }
-      }
-    } else {
-      // Knockout Global en toda la imagen (Ideal para eliminar el negro o blanco interno en DTF)
-      for (let i = 0; i < src.length; i += 4) {
-        if (src[i + 3] === 0) continue;
-        const dist = colorDistance(i);
-        if (dist <= maxDist) {
-          dst[i + 3] = 0;
-        } else if (featherDist > 0 && dist <= maxDist + featherDist) {
-          const factor = (dist - maxDist) / featherDist;
-          dst[i + 3] = Math.min(dst[i + 3], Math.round(src[i + 3] * factor));
-        }
-      }
-    }
-
-    // Contracción de bordes (Choke) para evitar halos blancos en impresión DTF
-    if (bgChoke > 0) {
-      let currentAlpha = new Uint8ClampedArray(w * h);
-      for (let p = 0; p < w * h; p++) currentAlpha[p] = dst[p * 4 + 3];
-
-      for (let step = 0; step < bgChoke; step++) {
-        const nextAlpha = new Uint8ClampedArray(currentAlpha);
-        for (let y = 1; y < h - 1; y++) {
-          for (let x = 1; x < w - 1; x++) {
-            const p = y * w + x;
-            if (currentAlpha[p] === 0) continue;
-            const minNeighbor = Math.min(
-              currentAlpha[p - 1],
-              currentAlpha[p + 1],
-              currentAlpha[p - w],
-              currentAlpha[p + w]
-            );
-            if (minNeighbor < currentAlpha[p]) {
-              nextAlpha[p] = Math.round((currentAlpha[p] + minNeighbor) * 0.35);
-            }
-          }
-        }
-        currentAlpha = nextAlpha;
-      }
-
-      for (let p = 0; p < w * h; p++) {
-        dst[p * 4 + 3] = currentAlpha[p];
-      }
-    }
-
-    return out;
+    return removeBackground(baseData, {
+      targetColor: bgTargetColor,
+      tolerance: bgTolerance,
+      feather: bgFeather,
+      choke: bgChoke,
+      contiguous: bgContiguous
+    });
   }, [bgTargetColor, bgTolerance, bgFeather, bgChoke, bgContiguous]);
 
   // ==========================================================================
