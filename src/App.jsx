@@ -1886,7 +1886,7 @@ export default function App() {
       'shirt-custom': customShirtColor
     };
     return {
-      backgroundColor: colorMap[bgPreviewMode] || '#0f0f12',
+      backgroundColor: colorMap[bgPreviewMode] || '#000000',
       backgroundImage: 'none'
     };
   };
