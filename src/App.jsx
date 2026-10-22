@@ -372,33 +372,6 @@ const hexToRgb = (hex) => {
   };
 };
 
-const estimateBorderBackgroundColor = (imageData) => {
-  if (!imageData) return '#141418';
-  const { width, height, data } = imageData;
-  const step = Math.max(1, Math.floor(Math.min(width, height) / 22));
-  const scores = new Map();
-  const addSample = (x, y) => {
-    const idx = (y * width + x) * 4;
-    const alpha = data[idx + 3] ?? 0;
-    if (alpha < 32) return;
-    const key = `${data[idx]}-${data[idx + 1]}-${data[idx + 2]}`;
-    scores.set(key, (scores.get(key) || 0) + 1 + Math.round(alpha / 60));
-  };
-
-  for (let y = 0; y < height; y += step) {
-    addSample(0, y);
-    addSample(width - 1, y);
-  }
-  for (let x = 0; x < width; x += step) {
-    addSample(x, 0);
-    addSample(x, height - 1);
-  }
-
-  const best = [...scores.entries()].sort((a, b) => b[1] - a[1])[0];
-  if (!best) return '#141418';
-  const [r, g, b] = best[0].split('-').map(Number);
-  return rgbToHex(r, g, b);
-};
 
 // Genera un archivo SVG vectorial limpio y compacto usando barras horizontales unificadas por capa de color
 const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false) => {
@@ -612,9 +585,10 @@ export default function App() {
   const loadSamplePreset = useCallback((type, title) => {
     const sampleCanvas = generateSampleArtwork(type);
     const ctx = sampleCanvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
-
-    setBgTargetColor(estimateBorderBackgroundColor(imgData));
+    const r = imgData.data[0];
+    const g = imgData.data[1];
+    const b = imgData.data[2];
+    setBgTargetColor(rgbToHex(r, g, b));
 
     const clone = new ImageData(new Uint8ClampedArray(imgData.data), imgData.width, imgData.height);
     setHistory([{ imageData: clone, label: `Original: ${title}` }]);
@@ -684,8 +658,7 @@ export default function App() {
       bitmap.close();
       const imageData = context.getImageData(0, 0, width, height);
       if (imageData.data[3] > 200) {
-        const detected = estimateBorderBackgroundColor(imageData);
-        setBgTargetColor(detected);
+        setBgTargetColor(rgbToHex(imageData.data[0], imageData.data[1], imageData.data[2]));
       }
       setHistory([{ imageData, label: file.name }]);
       setHistoryIndex(0);
@@ -856,17 +829,14 @@ export default function App() {
     const dst = out.data;
 
     const target = hexToRgb(bgTargetColor);
-    const baseTolerance = (bgTolerance / 100) * 441.67;
-    const softTolerance = baseTolerance + (bgFeather / 100) * 220.83;
-    const maxDist = Math.max(12, baseTolerance);
-    const featherDist = Math.max(0, softTolerance - maxDist);
+    const maxDist = (bgTolerance / 100) * 441.67; // 441.67 es la distancia máxima en RGB
+    const featherDist = (bgFeather / 100) * 441.67;
 
     const colorDistance = (idx) => {
       const dr = src[idx] - target.r;
       const dg = src[idx + 1] - target.g;
       const db = src[idx + 2] - target.b;
-      const alphaWeight = 0.35 + (src[idx + 3] / 255) * 0.65;
-      return Math.sqrt(dr * dr + dg * dg + db * db) * alphaWeight;
+      return Math.sqrt(dr * dr + dg * dg + db * db);
     };
 
     if (bgContiguous) {
@@ -880,7 +850,7 @@ export default function App() {
         const p = y * w + x;
         if (visited[p]) return;
         const dist = colorDistance(p * 4);
-        if (dist <= maxDist + featherDist * 1.25) {
+        if (dist <= maxDist + featherDist) {
           visited[p] = 1;
           queue[tail++] = p;
         }
@@ -901,14 +871,14 @@ export default function App() {
         const dist = colorDistance(idx);
 
         if (dist <= maxDist) {
-          const alphaFade = Math.max(0, 1 - dist / Math.max(maxDist, 1));
-          dst[idx + 3] = Math.round(src[idx + 3] * Math.max(0.05, alphaFade));
+          dst[idx + 3] = 0;
         } else if (featherDist > 0 && dist <= maxDist + featherDist) {
-          const factor = (dist - maxDist) / Math.max(featherDist, 1);
-          dst[idx + 3] = Math.min(dst[idx + 3], Math.round(src[idx + 3] * (1 - factor * 0.9)));
+          const factor = (dist - maxDist) / featherDist;
+          dst[idx + 3] = Math.min(dst[idx + 3], Math.round(src[idx + 3] * factor));
         }
 
-        if (dist <= maxDist + featherDist * 0.75) {
+        // Expandir solo si está dentro del umbral principal
+        if (dist <= maxDist) {
           const x = p % w;
           const y = (p / w) | 0;
           if (x > 0) tryEnqueue(x - 1, y);
@@ -923,11 +893,10 @@ export default function App() {
         if (src[i + 3] === 0) continue;
         const dist = colorDistance(i);
         if (dist <= maxDist) {
-          const alphaFade = Math.max(0, 1 - dist / Math.max(maxDist, 1));
-          dst[i + 3] = Math.round(src[i + 3] * Math.max(0.05, alphaFade));
+          dst[i + 3] = 0;
         } else if (featherDist > 0 && dist <= maxDist + featherDist) {
-          const factor = (dist - maxDist) / Math.max(featherDist, 1);
-          dst[i + 3] = Math.min(dst[i + 3], Math.round(src[i + 3] * (1 - factor * 0.9)));
+          const factor = (dist - maxDist) / featherDist;
+          dst[i + 3] = Math.min(dst[i + 3], Math.round(src[i + 3] * factor));
         }
       }
     }
