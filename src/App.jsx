@@ -1766,12 +1766,9 @@ export default function App() {
       'shirt-gray': '#52525b',
       'shirt-custom': customShirtColor
     };
-    const isSolidShirtColor = bgPreviewMode === 'shirt-black' || bgPreviewMode === 'shirt-white';
     return {
-      backgroundColor: colorMap[bgPreviewMode] || '#0f0f12',
-      backgroundImage: isSolidShirtColor
-        ? 'none'
-        : 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.28) 100%)'
+      backgroundColor: colorMap[bgPreviewMode] || '#000000',
+      backgroundImage: 'none'
     };
   };
 
