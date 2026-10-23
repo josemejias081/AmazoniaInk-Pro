@@ -486,12 +486,14 @@ export default function App() {
 
   // Estado persistente para la Plancha DTF (evita perder el trabajo al cambiar de pestaña)
   const [gangSheetState, setGangSheetState] = useState({
-    sheetWidthCm: 30,
+    sheetWidthCm: 58,
     dpi: 300,
     gapMm: 5,
+    edgeMarginMm: 2,
     cutLines: true,
     exportCutLines: false,
     entries: [],
+    canvasItems: [],
     initialized: false
   });
 
@@ -640,7 +642,8 @@ export default function App() {
     setPrintHeightCm(25);
     setGangSheetState(prev => ({
       ...prev,
-      initialized: true,
+      initialized: false,
+      canvasItems: prev.entries.some(e => !e.isCurrentDesign) ? prev.canvasItems : [],
       entries: prev.entries.some(e => !e.isCurrentDesign)
         ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData: clone, name: title } : e)
         : [makeGangEntry(clone, title, true)]
@@ -748,7 +751,8 @@ export default function App() {
       setPrintHeightCm(Number((25 * ratio).toFixed(1)));
       setGangSheetState(prev => ({
         ...prev,
-        initialized: true,
+        initialized: false,
+        canvasItems: prev.entries.some(e => !e.isCurrentDesign) ? prev.canvasItems : [],
         entries: prev.entries.some(e => !e.isCurrentDesign)
           ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData, name: file.name } : e)
           : [makeGangEntry(imageData, file.name, true)]
@@ -2081,7 +2085,23 @@ export default function App() {
           </div>
         </div>
 
-        {/* Presets rápidos de prueba + Subida de archivo */}
+        {/* Controles superiores según el modo activo */}
+        {activeTab === 'gangsheet' ? (
+          <div className="flex items-center gap-3">
+            <span className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+              <Layers className="w-3.5 h-3.5" />
+              Creador de Metros DTF (58–60 cm)
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveTab('bg')}
+              className="rounded-xl border border-stone-700 bg-stone-800 hover:bg-stone-700 px-3.5 py-2 text-xs font-bold text-white flex items-center gap-2 shadow transition cursor-pointer"
+            >
+              <Undo2 className="w-4 h-4 text-emerald-400" />
+              <span>Volver al Estudio de Diseño</span>
+            </button>
+          </div>
+        ) : (
         <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden xl:flex items-center gap-1.5 bg-stone-800/80 p-1 rounded-lg border border-stone-700/60">
             <span className="text-[11px] text-stone-400 px-2 font-medium">Ejemplos:</span>
@@ -2211,6 +2231,7 @@ export default function App() {
             <span className="hidden sm:inline">{isExportingPng ? 'Preparando PNG…' : 'Descargar PNG'}</span>
           </button>
         </div>
+        )}
       </header>
 
       {/* Notificación Toast */}
@@ -2232,7 +2253,7 @@ export default function App() {
         {/* ------------------------------------------------------------------
             1. MENÚ LATERAL IZQUIERDO (MÓDULOS DE TRABAJO)
         ------------------------------------------------------------------ */}
-        <aside className="w-full lg:w-64 bg-stone-900 border-b lg:border-b-0 lg:border-r border-stone-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0">
+        <aside className={activeTab === 'gangsheet' ? 'hidden' : 'w-full lg:w-64 bg-stone-900 border-b lg:border-b-0 lg:border-r border-stone-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0'}>
           <div className="flex lg:flex-col gap-1.5 w-full">
             <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-stone-500 px-3 py-1.5">
               Flujo de Trabajo
@@ -2337,10 +2358,24 @@ export default function App() {
         </aside>
 
         {/* ------------------------------------------------------------------
+            MODO CREADOR DE METROS DTF (PANTALLA COMPLETA ESTILO TAKER.ES)
+        ------------------------------------------------------------------ */}
+        {activeTab === 'gangsheet' && (
+          <GangSheet
+            currentImageData={previewBufferRef.current || currentBaseImageData}
+            activeDesignName={activePresetName}
+            showToast={showToast}
+            persistedState={gangSheetState}
+            onStateChange={setGangSheetState}
+            onExitGangSheet={() => setActiveTab('bg')}
+          />
+        )}
+
+        {/* ------------------------------------------------------------------
             2. LIENZO CENTRAL INTERACTIVO Y SIMULADOR DE CAMISETA
         ------------------------------------------------------------------ */}
         <main
-          className="flex-1 flex flex-col bg-stone-950 relative overflow-hidden min-h-[420px]"
+          className={activeTab === 'gangsheet' ? 'hidden' : 'flex-1 flex flex-col bg-stone-950 relative overflow-hidden min-h-[420px]'}
           onDragOver={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
@@ -2431,17 +2466,19 @@ export default function App() {
 
             {/* Controles de Comparación Antes/Después y Zoom */}
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCompareSplit(!compareSplit)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
-                  compareSplit
-                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                    : 'border-stone-700 text-stone-300 hover:bg-stone-800'
-                }`}
-              >
-                <SplitSquareVertical className="w-3.5 h-3.5" />
-                <span>Antes / Después</span>
-              </button>
+              {activeTab !== 'gangsheet' && (
+                <button
+                  onClick={() => setCompareSplit(!compareSplit)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition ${
+                    compareSplit
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                      : 'border-stone-700 text-stone-300 hover:bg-stone-800'
+                  }`}
+                >
+                  <SplitSquareVertical className="w-3.5 h-3.5" />
+                  <span>Antes / Después</span>
+                </button>
+              )}
 
               <div className="flex items-center bg-stone-800 rounded-md border border-stone-700">
                 <button
@@ -2451,9 +2488,14 @@ export default function App() {
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="text-xs font-mono px-2 text-stone-300">
+                <button
+                  type="button"
+                  onClick={() => setZoom(1)}
+                  title="Restablecer zoom al 100%"
+                  className="text-xs font-mono px-2 text-stone-300 hover:text-white"
+                >
                   {Math.round(zoom * 100)}%
-                </span>
+                </button>
                 <button
                   onClick={() => setZoom(z => Math.min(2.2, +(z + 0.15).toFixed(2)))}
                   className="p-1.5 hover:bg-stone-700 text-stone-300"
@@ -2465,7 +2507,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Área del Lienzo */}
+          {/* Área del Lienzo de diseño individual */}
           <div className="flex-1 overflow-auto flex items-center justify-center p-6 relative">
             <div
               className="relative rounded-xl shadow-2xl border border-stone-700/80 transition-all duration-150 overflow-hidden"
@@ -2582,7 +2624,7 @@ export default function App() {
         {/* ------------------------------------------------------------------
             3. PANEL LATERAL DERECHO (CONTROLES DE CADA MÓDULO)
         ------------------------------------------------------------------ */}
-        <aside className="w-full lg:w-96 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6">
+        <aside className={activeTab === 'gangsheet' ? 'hidden' : 'w-full lg:w-96 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6'}>
           {isImageFullyOpaque && activeTab !== 'bg' && (
             <div className="flex items-start gap-2.5 rounded-xl border border-amber-600/50 bg-amber-950/30 p-3 text-xs text-amber-200">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -2832,15 +2874,6 @@ export default function App() {
               )}
 
             </div>
-          )}
-          {activeTab === 'gangsheet' && (
-            <GangSheet
-              currentImageData={previewBufferRef.current || currentBaseImageData}
-              activeDesignName={activePresetName}
-              showToast={showToast}
-              persistedState={gangSheetState}
-              onStateChange={setGangSheetState}
-            />
           )}
 
           {/* ================================================================
