@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import logo from '../sources/logo.jpg';
+import logo from '../sources/logo.jpeg';
 import {
   Upload, Eraser, Grid, Layers, Maximize2, Download, Undo2, Redo2,
   ZoomIn, ZoomOut, Shirt, Sparkles, Sliders, Check, RefreshCw, Eye,
@@ -19,344 +19,162 @@ const MAX_SOURCE_DIMENSION = 16000;
 const MAX_SOURCE_PIXELS = 40_000_000;
 
 // ============================================================================
-// GENERADORES DE GRÁFICOS DE PRUEBA (PROCEDURAL ARTWORK)
+// CARGADOR DE IMAGEN OFICIAL AMAZONIAINK® (sources/logo.jpeg) Y CARTAS TÉCNICAS
 // ============================================================================
-const generateSampleArtwork = (type) => {
+let cachedLogoCanvas = null;
+let cachedTransparentLogoCanvas = null;
+
+const loadOfficialLogoCanvases = async () => {
+  if (cachedLogoCanvas && cachedTransparentLogoCanvas) {
+    return { rawCanvas: cachedLogoCanvas, transparentCanvas: cachedTransparentLogoCanvas };
+  }
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = logo;
+  });
+
+  const width = img.naturalWidth || 1000;
+  const height = img.naturalHeight || 1000;
+
+  const rawCanvas = document.createElement('canvas');
+  rawCanvas.width = width;
+  rawCanvas.height = height;
+  const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+  rawCtx.drawImage(img, 0, 0, width, height);
+
+  // Crear versión con fondo transparente del logo real para integrarla en las cartas técnicas
+  const rawData = rawCtx.getImageData(0, 0, width, height);
+  const cornerRgb = {
+    r: rawData.data[0],
+    g: rawData.data[1],
+    b: rawData.data[2]
+  };
+  const knockedOut = removeBackground(rawData, {
+    targetRgb: cornerRgb,
+    tolerance: 28,
+    feather: 10,
+    contiguous: false,
+    choke: 1
+  });
+
+  const transparentCanvas = document.createElement('canvas');
+  transparentCanvas.width = width;
+  transparentCanvas.height = height;
+  const transCtx = transparentCanvas.getContext('2d');
+  transCtx.putImageData(knockedOut, 0, 0);
+
+  cachedLogoCanvas = rawCanvas;
+  cachedTransparentLogoCanvas = transparentCanvas;
+  return { rawCanvas, transparentCanvas };
+};
+
+const generateSampleArtwork = async (type) => {
+  const { rawCanvas, transparentCanvas } = await loadOfficialLogoCanvases();
+
+  if (type === 'brand') {
+    // 1. LOGOTIPO OFICIAL AMAZONIAINK® (Archivo real sources/logo.jpeg íntegro en su resolución nativa)
+    const cloneCanvas = document.createElement('canvas');
+    cloneCanvas.width = rawCanvas.width;
+    cloneCanvas.height = rawCanvas.height;
+    const cloneCtx = cloneCanvas.getContext('2d');
+    cloneCtx.drawImage(rawCanvas, 0, 0);
+    return cloneCanvas;
+  }
+
   const canvas = document.createElement('canvas');
-  canvas.width = 800;
-  canvas.height = 800;
+  canvas.width = 1000;
+  canvas.height = 1000;
   const ctx = canvas.getContext('2d');
 
-  if (type === 'tiger') {
-    // Fondo oscuro sólido (para probar Quitar Fondo y Knockout DTF)
+  if (type === 'halftone') {
+    // 2. CARTA TÉCNICA DE CALIBRACIÓN DE SEMITONOS Y DEGRADADOS DTF (Con el logo real integrado)
     ctx.fillStyle = '#141418';
-    ctx.fillRect(0, 0, 800, 800);
+    ctx.fillRect(0, 0, 1000, 1000);
 
-    // Resplandor exterior suave (ideal para probar Semitonos DTF)
-    const grad = ctx.createRadialGradient(400, 400, 120, 400, 400, 370);
-    grad.addColorStop(0, 'rgba(255, 100, 0, 0.9)');
-    grad.addColorStop(0.5, 'rgba(220, 38, 38, 0.45)');
-    grad.addColorStop(1, 'rgba(20, 20, 24, 0)');
-    ctx.fillStyle = grad;
+    // Halo continuo radial para calibrar Knockout de Sombra DTF y LPI
+    const radialGrad = ctx.createRadialGradient(500, 430, 80, 500, 430, 390);
+    radialGrad.addColorStop(0, 'rgba(16, 185, 129, 0.95)');
+    radialGrad.addColorStop(0.45, 'rgba(6, 182, 212, 0.55)');
+    radialGrad.addColorStop(0.75, 'rgba(30, 58, 138, 0.25)');
+    radialGrad.addColorStop(1, 'rgba(20, 20, 24, 0)');
+    ctx.fillStyle = radialGrad;
     ctx.beginPath();
-    ctx.arc(400, 400, 370, 0, Math.PI * 2);
+    ctx.arc(500, 430, 390, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sol retro japonés en franjas
+    // Esfera central luminosa con degradado suave para resaltar el logo oficial
     ctx.save();
     ctx.beginPath();
-    ctx.arc(400, 370, 220, 0, Math.PI * 2);
+    ctx.arc(500, 430, 285, 0, Math.PI * 2);
     ctx.clip();
-    const sunGrad = ctx.createLinearGradient(0, 150, 0, 590);
-    sunGrad.addColorStop(0, '#fde047');
-    sunGrad.addColorStop(0.5, '#f97316');
-    sunGrad.addColorStop(1, '#dc2626');
-    ctx.fillStyle = sunGrad;
-    for (let y = 140; y < 600; y += 26) {
-      const h = Math.max(4, 20 - (y - 140) * 0.025);
-      ctx.fillRect(150, y, 500, h);
-    }
+    const sphereGrad = ctx.createLinearGradient(215, 145, 785, 715);
+    sphereGrad.addColorStop(0, '#ffffff');
+    sphereGrad.addColorStop(0.65, '#d1fae5');
+    sphereGrad.addColorStop(1, '#34d399');
+    ctx.fillStyle = sphereGrad;
+    ctx.fillRect(215, 145, 570, 570);
     ctx.restore();
 
-    // Escudo geométrico de tigre / samurai
-    ctx.fillStyle = '#f59e0b';
-    ctx.strokeStyle = '#09090b';
-    ctx.lineWidth = 14;
-    ctx.lineJoin = 'round';
+    // Dibujar el logotipo real de AmazoniaInk® centrado sobre la esfera
+    ctx.drawImage(transparentCanvas, 200, 130, 600, 600);
 
-    // Orejas
-    ctx.beginPath();
-    ctx.arc(270, 230, 55, 0, Math.PI * 2);
-    ctx.arc(530, 230, 55, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    // Escala de grises de 10 pasos en la base (10% a 100%) para verificar ganancia de punto
+    const barLeft = 140;
+    const barTop = 775;
+    const stepW = 72;
+    const stepH = 44;
+    for (let i = 0; i < 10; i++) {
+      const lum = Math.round(((i + 1) / 10) * 255);
+      ctx.fillStyle = `rgb(${lum}, ${lum}, ${lum})`;
+      ctx.fillRect(barLeft + i * stepW, barTop, stepW - 4, stepH);
+    }
 
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.arc(270, 230, 28, 0, Math.PI * 2);
-    ctx.arc(530, 230, 28, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Cabeza principal
-    ctx.fillStyle = '#f97316';
-    ctx.beginPath();
-    ctx.moveTo(250, 240);
-    ctx.lineTo(550, 240);
-    ctx.lineTo(610, 390);
-    ctx.lineTo(520, 560);
-    ctx.lineTo(400, 610);
-    ctx.lineTo(280, 560);
-    ctx.lineTo(190, 390);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Mejillas blancas
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(195, 390);
-    ctx.lineTo(310, 420);
-    ctx.lineTo(285, 555);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(605, 390);
-    ctx.lineTo(490, 420);
-    ctx.lineTo(515, 555);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Rayas negras
-    ctx.fillStyle = '#09090b';
-    const stripes = [
-      [[225, 310], [310, 330], [235, 355]],
-      [[575, 310], [490, 330], [565, 355]],
-      [[210, 365], [290, 380], [220, 400]],
-      [[590, 365], [510, 380], [580, 400]],
-      [[380, 245], [420, 245], [400, 335]]
-    ];
-    stripes.forEach(pts => {
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      ctx.lineTo(pts[1][0], pts[1][1]);
-      ctx.lineTo(pts[2][0], pts[2][1]);
-      ctx.closePath();
-      ctx.fill();
-    });
-
-    // Ojos
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.moveTo(260, 350);
-    ctx.lineTo(360, 380);
-    ctx.lineTo(340, 415);
-    ctx.lineTo(255, 390);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(540, 350);
-    ctx.lineTo(440, 380);
-    ctx.lineTo(460, 415);
-    ctx.lineTo(545, 390);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Pupilas
-    ctx.fillStyle = '#dc2626';
-    ctx.beginPath();
-    ctx.arc(312, 385, 11, 0, Math.PI * 2);
-    ctx.arc(488, 385, 11, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Nariz y Boca
-    ctx.fillStyle = '#fb7185';
-    ctx.beginPath();
-    ctx.moveTo(355, 430);
-    ctx.lineTo(445, 430);
-    ctx.lineTo(400, 485);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Colmillos y boca abierta
-    ctx.fillStyle = '#09090b';
-    ctx.beginPath();
-    ctx.moveTo(320, 495);
-    ctx.lineTo(480, 495);
-    ctx.lineTo(450, 575);
-    ctx.lineTo(350, 575);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(330, 498);
-    ctx.lineTo(365, 498);
-    ctx.lineTo(348, 550);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(470, 498);
-    ctx.lineTo(435, 498);
-    ctx.lineTo(452, 550);
-    ctx.closePath();
-    ctx.fill();
-
-    // Tipografía Streetwear
-    ctx.font = '900 74px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    ctx.strokeStyle = '#09090b';
-    ctx.lineWidth = 18;
-    ctx.strokeText('TOKYO TIGER', 400, 700);
+    ctx.font = '800 36px system-ui, -apple-system, sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText('TOKYO TIGER', 400, 700);
+    ctx.fillText('CALIBRACIÓN DE TRAMA & SEMITONO DTF', 500, 885);
+    ctx.font = '600 20px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+    ctx.fillStyle = '#6ee7b7';
+    ctx.fillText('CONTROL DE DEGRADADO • KNOCKOUT DE SOMBRA & LPI', 500, 924);
+  } else if (type === 'spot') {
+    // 3. SELLO INDUSTRIAL DE TINTAS PLANAS (Con el logo real integrado para Vectorización y Serigrafía)
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, 1000, 1000);
 
-    ctx.font = '800 28px system-ui, -apple-system, sans-serif';
-    ctx.fillStyle = '#facc15';
-    ctx.fillText('EST. 1998 • EDICIÓN ESPECIAL DTF', 400, 748);
-  } else if (type === 'sunset') {
-    // Fondo Blanco Puro (ideal para probar quitar fondo blanco o sublimación)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, 800, 800);
-
-    ctx.save();
+    // Corona exterior en verde esmeralda plano
+    ctx.fillStyle = '#10b981';
     ctx.beginPath();
-    ctx.arc(400, 380, 270, 0, Math.PI * 2);
-    ctx.clip();
-
-    const bgGrad = ctx.createLinearGradient(0, 110, 0, 650);
-    bgGrad.addColorStop(0, '#4c1d95');
-    bgGrad.addColorStop(0.35, '#be185d');
-    bgGrad.addColorStop(0.7, '#f97316');
-    bgGrad.addColorStop(1, '#fde047');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(130, 110, 540, 540);
-
-    // Sol retro blanco/amarillo
-    ctx.fillStyle = '#fef9c3';
-    ctx.beginPath();
-    ctx.arc(400, 360, 115, 0, Math.PI * 2);
+    ctx.arc(500, 435, 320, 0, Math.PI * 2);
     ctx.fill();
 
-    // Líneas de corte del sol
-    ctx.fillStyle = '#be185d';
-    for (let y = 370; y < 480; y += 22) {
-      ctx.fillRect(260, y, 280, (y - 355) * 0.12);
-    }
-
-    // Montañas vectoriales
-    ctx.fillStyle = '#1e1b4b';
+    // Disco central en blanco puro plano para alojar el logo real con máximo contraste
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(100, 530);
-    ctx.lineTo(270, 380);
-    ctx.lineTo(410, 490);
-    ctx.lineTo(540, 355);
-    ctx.lineTo(710, 530);
-    ctx.closePath();
+    ctx.arc(500, 435, 275, 0, Math.PI * 2);
     ctx.fill();
 
-    // Rejilla Synthwave inferior
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(130, 515, 540, 150);
-    ctx.strokeStyle = '#06b6d4';
-    ctx.lineWidth = 3;
-    for (let i = -6; i <= 6; i++) {
-      ctx.beginPath();
-      ctx.moveTo(400 + i * 25, 515);
-      ctx.lineTo(400 + i * 110, 660);
-      ctx.stroke();
-    }
-    for (let y = 530; y < 650; y += 24) {
-      ctx.beginPath();
-      ctx.moveTo(130, y);
-      ctx.lineTo(670, y);
-      ctx.stroke();
-    }
-    ctx.restore();
+    // Dibujar el logotipo oficial real de AmazoniaInk® en el centro del escudo
+    ctx.drawImage(transparentCanvas, 210, 145, 580, 580);
 
-    // Marco circular limpio
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 16;
-    ctx.beginPath();
-    ctx.arc(400, 380, 270, 0, Math.PI * 2);
-    ctx.stroke();
+    // Cinta inferior en oro plano (#f59e0b) con borde blanco
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillRect(160, 790, 680, 96);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(160, 790, 680, 96);
 
-    ctx.font = '900 58px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#0f172a';
-    ctx.fillText('CALIFORNIA WAVE', 400, 725);
-    ctx.font = '700 24px system-ui, -apple-system, sans-serif';
-    ctx.fillStyle = '#db2777';
-    ctx.fillText('SUBLIMACIÓN & SERIGRAFÍA RETRO', 400, 765);
-  } else if (type === 'skull') {
-    // Emblema de colores planos (Ideal para Vectorizar / Separación por colores en Serigrafía)
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 800, 800);
+    ctx.font = '900 44px system-ui, -apple-system, sans-serif';
+    ctx.fillText('SEPARACIÓN SERIGRÁFICA SPOT', 500, 853);
 
-    // Rayos de fondo cian y magenta planos
-    ctx.fillStyle = '#06b6d4';
-    ctx.beginPath();
-    ctx.arc(400, 370, 250, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#ec4899';
-    ctx.beginPath();
-    ctx.moveTo(400, 80);
-    ctx.lineTo(490, 260);
-    ctx.lineTo(690, 290);
-    ctx.lineTo(545, 430);
-    ctx.lineTo(580, 630);
-    ctx.lineTo(400, 535);
-    ctx.lineTo(220, 630);
-    ctx.lineTo(255, 430);
-    ctx.lineTo(110, 290);
-    ctx.lineTo(310, 260);
-    ctx.closePath();
-    ctx.fill();
-
-    // Cráneo estilizado blanco y negro
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 18;
-    ctx.beginPath();
-    ctx.arc(400, 340, 155, Math.PI * 0.85, Math.PI * 0.15, false);
-    ctx.lineTo(495, 495);
-    ctx.lineTo(305, 495);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Cuencas oculares
-    ctx.fillStyle = '#000000';
-    ctx.beginPath();
-    ctx.arc(340, 350, 42, 0, Math.PI * 2);
-    ctx.arc(460, 350, 42, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Detalle amarillo en los ojos
-    ctx.fillStyle = '#facc15';
-    ctx.beginPath();
-    ctx.arc(340, 350, 16, 0, Math.PI * 2);
-    ctx.arc(460, 350, 16, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Fosa nasal
-    ctx.fillStyle = '#000000';
-    ctx.beginPath();
-    ctx.moveTo(400, 385);
-    ctx.lineTo(378, 430);
-    ctx.lineTo(422, 430);
-    ctx.closePath();
-    ctx.fill();
-
-    // Dientes
-    ctx.lineWidth = 10;
-    for (let x = 335; x <= 465; x += 32) {
-      ctx.beginPath();
-      ctx.moveTo(x, 455);
-      ctx.lineTo(x, 495);
-      ctx.stroke();
-    }
-
-    // Banner inferior amarillo
-    ctx.fillStyle = '#facc15';
-    ctx.fillRect(140, 635, 520, 95);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(140, 635, 520, 95);
-
-    ctx.fillStyle = '#000000';
-    ctx.font = '900 56px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('SKULL CREW', 400, 702);
+    ctx.font = '700 22px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+    ctx.fillText('CONTROL DE TINTAS PLANAS • VECTOR SVG & FOTOLITOS', 500, 938);
   }
 
   return canvas;
@@ -477,10 +295,10 @@ export default function App() {
   // Estado de la imagen maestra y pila de historial (Undo/Redo)
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [imageSize, setImageSize] = useState({ width: 800, height: 800 });
-  const [sourcePixelSize, setSourcePixelSize] = useState({ width: 800, height: 800 });
+  const [imageSize, setImageSize] = useState({ width: 1000, height: 1000 });
+  const [sourcePixelSize, setSourcePixelSize] = useState({ width: 1000, height: 1000 });
   const [sourceOriginalFile, setSourceOriginalFile] = useState(null);
-  const [activePresetName, setActivePresetName] = useState('Tigre Retro DTF');
+  const [activePresetName, setActivePresetName] = useState('Logo AmazoniaInk®');
   const [savedProjectName, setSavedProjectName] = useState('');
   const [savedProjectsList, setSavedProjectsList] = useState([]);
 
@@ -617,47 +435,51 @@ export default function App() {
   }, [historyIndex]);
 
   // Cargar imagen de ejemplo al iniciar
-  const loadSamplePreset = useCallback((type, title) => {
-    const sampleCanvas = generateSampleArtwork(type);
-    const ctx = sampleCanvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
-    const r = imgData.data[0];
-    const g = imgData.data[1];
-    const b = imgData.data[2];
-    setBgTargetColor(rgbToHex(r, g, b));
+  const loadSamplePreset = useCallback(async (type, title) => {
+    try {
+      const sampleCanvas = await generateSampleArtwork(type);
+      const ctx = sampleCanvas.getContext('2d');
+      const imgData = ctx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
+      const r = imgData.data[0];
+      const g = imgData.data[1];
+      const b = imgData.data[2];
+      setBgTargetColor(rgbToHex(r, g, b));
 
-    const clone = new ImageData(new Uint8ClampedArray(imgData.data), imgData.width, imgData.height);
-    setHistory([{ imageData: clone, label: `Original: ${title}`, toolId: 'source' }]);
-    setHistoryIndex(0);
-    setImageSize({ width: imgData.width, height: imgData.height });
-    setSourcePixelSize({ width: imgData.width, height: imgData.height });
-    setSourceOriginalFile(null);
-    setActivePresetName(title);
-    setSavedProjectName(title);
-    setBgPreviewPending(true);
-    setHtPreviewPending(true);
-    setVecPreviewPending(true);
-    setPrintUnit('cm');
-    setPrintWidthCm(25);
-    setPrintHeightCm(25);
-    setGangSheetState(prev => ({
-      ...prev,
-      initialized: false,
-      canvasItems: prev.entries.some(e => !e.isCurrentDesign) ? prev.canvasItems : [],
-      entries: prev.entries.some(e => !e.isCurrentDesign)
-        ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData: clone, name: title } : e)
-        : [makeGangEntry(clone, title, true)]
-    }));
+      const clone = new ImageData(new Uint8ClampedArray(imgData.data), imgData.width, imgData.height);
+      setHistory([{ imageData: clone, label: `Original: ${title}`, toolId: 'source' }]);
+      setHistoryIndex(0);
+      setImageSize({ width: imgData.width, height: imgData.height });
+      setSourcePixelSize({ width: imgData.width, height: imgData.height });
+      setSourceOriginalFile(null);
+      setActivePresetName(title);
+      setSavedProjectName(title);
+      setBgPreviewPending(true);
+      setHtPreviewPending(true);
+      setVecPreviewPending(true);
+      setPrintUnit('cm');
+      setPrintWidthCm(25);
+      setPrintHeightCm(25);
+      setGangSheetState(prev => ({
+        ...prev,
+        initialized: false,
+        canvasItems: prev.entries.some(e => !e.isCurrentDesign) ? prev.canvasItems : [],
+        entries: prev.entries.some(e => !e.isCurrentDesign)
+          ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData: clone, name: title } : e)
+          : [makeGangEntry(clone, title, true)]
+      }));
 
-    if (type === 'tiger') setBgPreviewMode('shirt-black');
-    else if (type === 'sunset') setBgPreviewMode('checker');
-    else setBgPreviewMode('shirt-gray');
+      if (type === 'halftone') setBgPreviewMode('shirt-black');
+      else if (type === 'brand') setBgPreviewMode('checker');
+      else setBgPreviewMode('shirt-gray');
 
-    showToast(`Diseño "${title}" cargado correctamente`);
+      showToast(`Muestra "${title}" cargada correctamente`);
+    } catch (err) {
+      console.error('Error cargando muestra:', err);
+    }
   }, [showToast]);
 
   useEffect(() => {
-    loadSamplePreset('tiger', 'Tigre Retro DTF');
+    loadSamplePreset('brand', 'Logo AmazoniaInk®');
     refreshSavedProjects();
   }, [loadSamplePreset, refreshSavedProjects]);
 
@@ -2104,36 +1926,39 @@ export default function App() {
         ) : (
         <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden xl:flex items-center gap-1.5 bg-stone-800/80 p-1 rounded-lg border border-stone-700/60">
-            <span className="text-[11px] text-stone-400 px-2 font-medium">Ejemplos:</span>
+            <span className="text-[11px] text-stone-400 px-2 font-medium">Muestras:</span>
             <button
-              onClick={() => loadSamplePreset('tiger', 'Tigre Retro DTF')}
+              onClick={() => loadSamplePreset('brand', 'Logo AmazoniaInk®')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                activePresetName === 'Tigre Retro DTF'
+                activePresetName === 'Logo AmazoniaInk®'
                   ? 'bg-emerald-500 text-stone-950 font-semibold'
                   : 'text-stone-300 hover:bg-stone-700'
               }`}
+              title="Logotipo oficial AmazoniaInk® en alta resolución para pruebas de recorte de fondo y plancha DTF"
             >
-              🐯 Tigre DTF
+              🌿 Logo AmazoniaInk®
             </button>
             <button
-              onClick={() => loadSamplePreset('sunset', 'Atardecer Retro')}
+              onClick={() => loadSamplePreset('halftone', 'Carta Semitono DTF')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                activePresetName === 'Atardecer Retro'
+                activePresetName === 'Carta Semitono DTF'
                   ? 'bg-emerald-500 text-stone-950 font-semibold'
                   : 'text-stone-300 hover:bg-stone-700'
               }`}
+              title="Carta técnica de calibración tonal para semitonos y knockout de sombra DTF"
             >
-              🌅 Atardecer (Fondo Blanco)
+              🎯 Carta Halftone DTF
             </button>
             <button
-              onClick={() => loadSamplePreset('skull', 'Emblema Serigrafía')}
+              onClick={() => loadSamplePreset('spot', 'Sello 4 Tintas Planas')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                activePresetName === 'Emblema Serigrafía'
+                activePresetName === 'Sello 4 Tintas Planas'
                   ? 'bg-emerald-500 text-stone-950 font-semibold'
                   : 'text-stone-300 hover:bg-stone-700'
               }`}
+              title="Sello industrial de 4 tintas planas para separación serigráfica, vectorización SVG y fotolitos"
             >
-              💀 Skull (Colores Planos)
+              🛡️ Sello 4 Tintas (Spot)
             </button>
           </div>
 

@@ -1,73 +1,177 @@
-# AmazoniaInk Pro
+<div align="center">
 
-Aplicación web de preimpresión para preparar diseños destinados a DTF, sublimación y serigrafía. Permite editar imágenes en el navegador y exportarlas como PNG, SVG y fotolitos.
+<img src="./sources/logo.jpeg" alt="AmazoniaInk Pro Logo" width="140" style="border-radius: 18px;" />
 
-## Requisitos
+# AmazoniaInk® Pro
 
-- Node.js 18 o superior
-- npm
-- Un navegador web moderno
+### Suite Profesional de Preimpresión Textil, Semitonos, Separación de Tintas y Creador de Metros DTF
 
-## Instalación y ejecución
+[![Estado de Compilación](https://img.shields.io/badge/Build-Vite%206%20Passing-10b981?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Motor Gráfico](https://img.shields.io/badge/Engine-HTML5%20Canvas%20%2B%20Web%20Workers-06b6d4?style=for-the-badge&logo=javascript&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API)
+[![Resolución Física](https://img.shields.io/badge/Output-300%20%2F%20600%20DPI%20(pHYs%20Chunk)-f59e0b?style=for-the-badge)](https://www.w3.org/TR/png/#11pHYs)
+[![Privacidad](https://img.shields.io/badge/100%25%20Client--Side-Zero%20Server%20Uploads-8b5cf6?style=for-the-badge)](#arquitectura-y-privacidad)
 
-En una terminal, cambia a la carpeta del proyecto antes de ejecutar los comandos:
+**AmazoniaInk® Pro** es una estación de trabajo de preimpresión textil ejecutada íntegramente en el navegador (*100% Client-Side*). Diseñada para talleres de **impresión DTF (Direct to Film)**, **serigrafía textil** y **sublimación**, reúne en una sola interfaz extracción de fondos con contracción de base blanca (*Choke*), tramado de semitonos de *tacto cero*, separación vectorial de colores planos con marcas de registro y un **Creador Interactivo de Metros DTF (58–60 cm)** con empaquetado automático.
+
+[Explorar Módulos](#-flujo-de-trabajo-y-módulos-de-producción) • [Creador de Metros DTF](#-creador-de-metros-dtf-5860-cm) • [Instalación Rápida](#-instalación-y-ejecución-local) • [Arquitectura Técnica](#-arquitectura-técnica-y-motores-de-imagen) • [Despliegue](#-despliegue-en-producción-y-github-pages)
+
+</div>
+
+---
+
+## 🎯 Propósito e Ingeniería Aplicada a Producción Real
+
+En la producción textil diaria, los errores más costosos provienen de archivos mal preparados antes de llegar al software RIP (*Cadlink Digital Factory*, *Maintop*, *AcroRIP*, *NeoStampa*):
+
+- **Halos blancos indeseados en DTF:** Borde semitransparente que recibe tinta blanca y poliamida adhesiva.
+- **Efecto «parche plástico» (*Bulletproof Print*):** Grandes masas de tinta sólida sobre prendas oscuras que impiden la transpiración.
+- **Pérdida de escala física al importar en el RIP:** Archivos PNG exportados a 72 DPI nominales que se redimensionan incorrectamente al abrirlos en el plotter.
+- **Desperdicio de película DTF:** Montajes manuales lentos en bobinas comerciales de **58 a 60 cm**.
+
+**AmazoniaInk® Pro** resuelve cada uno de estos puntos críticos antes de exportar el archivo final de máquina.
+
+---
+
+## 🛠️ Flujo de Trabajo y Módulos de Producción
+
+```mermaid
+flowchart LR
+    A["1. Quitar Fondo & Choke DTF"] --> B["2. Semitonos (Halftone / LPI)"]
+    B --> C["3. Vectorización & Fotolitos"]
+    C --> D["4. Escalado 300 DPI & Espejo"]
+    D --> E["5. Creador de Metros DTF (58-60 cm)"]
+    D --> F["6. Centro de Exportación RIP"]
+```
+
+### 1. Quitar Fondo, Knockout y Contracción de Borde (*Choke DTF*)
+- **Extracción por Contigüidad (*Flood-Fill BFS*) o *Knockout Total*:**
+  - **Solo Exterior:** Elimina el fondo conectado a los márgenes del lienzo protegiendo zonas internas del mismo color dentro del arte. Traspasa automáticamente márgenes ya transparentes para limpiar marcos residuales.
+  - **Knockout Total:** Vacía el color seleccionado en todo el diseño (ideal para aprovechar el negro o blanco de la propia camiseta).
+- **Antialiasing proporcional (*Feather*) y Contracción de Borde (*Choke* de 0 a 4 px):** Erosión morfológica del canal alfa que retrae el borde opaco y elimina residuos semitransparentes (`alpha < 16`), evitando que asome el halo de base blanca en DTF.
+- **Pinceles manuales de precisión:** Herramientas de **Cuentagotas**, **Borrador manual** y **Pincel de restauración** contra el archivo original.
+
+### 2. Generador de Semitonos (*Halftone DTF & Serigrafía*)
+- **3 Modos de Trama Especializados:**
+  1. **Knockout de Sombra DTF (*Tacto Cero*):** Conserva los colores vivos del diseño y convierte sombras y degradados oscuros en tramas transpirables para prendas negras.
+  2. **Fotolito Monocromo (Serigrafía 1 Tinta):** Puntos negros 100% opacos sobre transparencia pura para insolación de pantallas.
+  3. **Cuatricromía CMYK Simulada:** Separación angular clásica de artes gráficas (`C: 15°`, `M: 75°`, `Y: 0°`, `K: 45°`).
+- **Control Total de Trama:**
+  - **Método:** Trama geométrica AM (*Círculo*, *Diamante*, *Línea*, *Cruz*) o difusión estocástica FM (*Floyd–Steinberg*).
+  - **Frecuencia real en LPI (*Lines Per Inch*):** Configurable de `5 LPI` a `100 LPI` y ángulo libre (`0°` a `90°`).
+  - **Curva Tonal Previa:** Ajuste de *Punto Negro*, *Punto Blanco*, *Gamma* y eliminación automática de fondo negro perimetral.
+
+### 3. Vectorización K-Means y Separación de Colores (*Spot Colors*)
+- **Cuantización cromática inteligente:** Agrupa la imagen entre **2 y 10 tintas planas** para serigrafía textil, ignorando píxeles transparentes y limpiando ruido mediante filtrado modal.
+- **Edición interactiva por pantalla:** Permite ocultar/mostrar capas individuales, reasignar el color hexadecimal de cada tinta en vivo y consultar su porcentaje de cobertura.
+- **Salidas listas para taller:**
+  - **Trazado Vectorial SVG (`buildOptimizedSVG`):** Compresión por barrido horizontal (*Run-Length Encoding scanline*) agrupado por capas `<g id="capa-...">`.
+  - **Fotolitos Individuales PNG:** Descarga de cada pantalla en negro 100% opaco con **marcas de registro serigráficas** opcionales.
+
+### 4. Escalado Físico, Auditoría de DPI y Modo Espejo
+- **Dimensionamiento exacto en `cm` o `in`:** Presets directos para *Escudo Pecho (10×10 cm)*, *A4*, *A3*, *A3+* y bobinas DTF.
+- **Auditoría de Resolución Efectiva en Vivo:** Calcula los **DPI reales** a partir de las dimensiones nativas del archivo original frente al tamaño físico solicitado, alertando si la densidad cae por debajo del estándar óptimo de **300 DPI**.
+- **Previsualización de Base Blanca (*White Underbase*):** Simula la máscara blanca con contracción (*Choke* de `0` a `8 px`) y permite exportarla por separado.
+
+---
+
+## 📏 Creador de Metros DTF (58–60 cm)
+
+El módulo **5. Plancha DTF** despliega un entorno de trabajo a pantalla completa diseñado específicamente para el estándar comercial de impresión DTF por metros:
+
+| Característica | Especificación Técnica |
+| :--- | :--- |
+| **Anchos Comerciales de Bobina** | **58 cm** (*Estándar Comercial DTF*), **60 cm** (*Bobina Completa*), **56 cm** (*Área útil segura*), **30 cm** (*Medio Rollo / A3*) |
+| **Largo de Plancha Dinámico** | Calculado automáticamente en tiempo real (`cm` y `m`) según la caja delimitadora del último elemento colocado + margen |
+| **Interacción Directa en Lienzo** | Selección, arrastre libre con imán (*Snap*) a bordes y centro, redimensionado desde esquinas, rotación `±90°` y espejo `H/V` |
+| **Auto-Compactación (*Auto-Nest*)** | Algoritmo de empaquetado *Shelf Best-Fit* ordenado por altura que minimiza los metros lineales consumidos |
+| **Creación Automática (*Auto-Build*)** | Modal por lotes para definir ancho (`cm`) y cantidad de copias de todas las imágenes subidas y armar el pliego en un clic |
+| **Rellenar Fila (*Auto-Fill Row*)** | Calcula cuántas repeticiones caben en los 58–60 cm de ancho respetando el margen configurado y completa la fila automáticamente |
+| **Auto-Trim de Transparencia** | Recorta al vuelo el aire transparente sobrante alrededor de cada PNG al subirlo para no desperdiciar película DTF |
+| **Diagnóstico Visual de Calidad** | Bordes codificados por color según DPI efectivos (**Verde** `≥300`, **Amarillo** `≥250`, **Rojo** `≥200`, **Negro** `<200`) y alerta de **Superposición / Fuera de rollo** |
+
+---
+
+## 🧪 Muestras Corporativas y Cartas de Calibración Incluidas
+
+La aplicación incorpora tres patrones maestros generados vectorialmente a **1000×1000 px** para validar cada etapa sin depender de imágenes externas de baja calidad:
+
+1. **🌿 Logo AmazoniaInk® (`brand`):** Emblema corporativo oficial en alta definición sobre placa neutra `#e2e5e6`, diseñado para probar extracción de fondo en 1 clic, *Choke DTF* y repetición de escudos en plancha.
+2. **🎯 Carta Halftone DTF (`halftone`):** Carta técnica con esfera de degradado continuo, anillo de luminancia y cuña de 10 pasos de gris (`10%–100%`) sobre fondo carbón `#141418`, ideal para calibrar el *Knockout de Sombra* y la frecuencia LPI.
+3. **🛡️ Sello 4 Tintas Spot (`spot`):** Insignia industrial compuesta estrictamente por 4 tintas planas sin degradados, lista para verificar la separación cromática SVG y la generación de fotolitos serigráficos.
+
+---
+
+## 🏗️ Arquitectura Técnica y Motores de Imagen
+
+```
+App_dtf/
+├── src/
+│   ├── App.jsx                         # Estación principal, historial Undo/Redo y motores de edición
+│   ├── GangSheet.jsx                   # Creador interactivo de metros DTF (58-60 cm × largo dinámico)
+│   ├── main.jsx                        # Punto de entrada React 18
+│   └── utils/
+│       ├── backgroundRemoval.js        # Flood-fill BFS contiguo, knockout global y erosión de borde (Choke)
+│       ├── gangSheetLayout.js          # Motor matemático de distribución en bobina y cálculo de aprovechamiento
+│       ├── printProduction.js          # Cálculo de rasterizado físico e inyección binaria del chunk PNG pHYs (CRC32)
+│       ├── underbase.js                # Generador de máscara de base blanca DTF con umbral anti-halo
+│       ├── projectStore.js             # Persistencia local en IndexedDB (proyectos, historial y pliegos)
+│       └── *.test.js                   # Suite de pruebas unitarias automatizadas (Node Test Runner)
+├── sources/
+│   └── logo.jpeg                       # Activo de marca oficial AmazoniaInk® en alta resolución
+└── vite.config.js                      # Configuración de compilación y Web Workers
+```
+
+### Inyección Binaria de Densidad Física (`pHYs` Chunk PNG)
+Los navegadores exportan los lienzos HTML5 a `72 DPI` por omisión. El módulo [`src/utils/printProduction.js`](./src/utils/printProduction.js) intercepta el binario PNG generado y escribe directamente el bloque estándar **`pHYs`** (con suma de verificación `CRC32` calculada al vuelo) indicando los píxeles por metro exactos (`11811 ppm` para `300 DPI`). Así, al importar el PNG en **Cadlink**, **Maintop**, **Photoshop** o **Illustrator**, el archivo se abre exactamente con sus centímetros reales de impresión.
+
+### Arquitectura y Privacidad
+Todo el procesamiento de píxeles, vectorización y empaquetado de planchas se ejecuta localmente en la memoria del navegador del usuario mediante `TypedArrays` (`Uint8ClampedArray`, `Uint32Array`) y `IndexedDB`. **Ningún diseño ni propiedad intelectual de tus clientes se sube a servidores externos.**
+
+---
+
+## 🚀 Instalación y Ejecución Local
+
+### Requisitos Previos
+- **Node.js** `>= 18.0.0`
+- **npm** `>= 9.0.0`
+
+### Pasos de Instalación
 
 ```bash
-cd ruta/a/la/carpeta-del-proyecto
+# 1. Clonar el repositorio
+git clone https://github.com/josemejias081/AmazoniaInk-Pro.git
+cd AmazoniaInk-Pro
+
+# 2. Instalar dependencias
 npm install
+
+# 3. Iniciar el servidor de desarrollo con recarga en caliente (HMR)
 npm run dev
 ```
 
-Abre en el navegador la dirección local que muestra Vite (normalmente `http://localhost:5173/`). No abras `index.html` con Live Server: el proyecto usa React y JSX, que necesitan el servidor de desarrollo de Vite para compilarse.
+Abre `http://localhost:5173/` en tu navegador.
 
-Para generar una compilación de producción:
+### Comandos Disponibles
 
-```bash
-npm run build
-```
+| Comando | Descripción |
+| :--- | :--- |
+| `npm run dev` | Inicia el servidor de desarrollo Vite en `http://localhost:5173/` |
+| `npm test` | Ejecuta las 19 pruebas unitarias de motores DTF, DPI, `pHYs`, `Choke` y `GangSheet` |
+| `npm run build` | Genera la compilación optimizada de producción en la carpeta `dist/` |
+| `npm run preview` | Sirve localmente la compilación de producción para verificación final |
 
-Para previsualizar esa compilación localmente:
+---
 
-```bash
-npm run preview
-```
+## 🌐 Despliegue en Producción y GitHub Pages
 
-## Publicación en GitHub Pages
+El repositorio cuenta con integración continua mediante **GitHub Actions** (`.github/workflows/`):
 
-El proyecto incluye un workflow de GitHub Actions que compila y publica el sitio en GitHub Pages cuando se hace `push` a la rama `main`. La configuración de Vite usa la ruta del repositorio `AmazoniaInk-Pro` (respetando mayúsculas y minúsculas).
+1. En tu repositorio de GitHub, dirígete a **Settings → Pages**.
+2. En **Build and deployment → Source**, selecciona **GitHub Actions**.
+3. Cada `push` a la rama `main` ejecuta automáticamente la compilación de producción y actualiza el sitio publicado.
 
-1. Sube el proyecto a un repositorio público de GitHub llamado `amazoniaink-pro`.
-2. En el repositorio, abre **Settings → Pages** y selecciona **GitHub Actions** como origen del despliegue.
-3. Haz `push` a la rama `main` o ejecuta manualmente el workflow **Deploy to GitHub Pages** desde la pestaña **Actions**.
-4. Cuando finalice el workflow, GitHub mostrará el enlace público del sitio en **Settings → Pages**. Para una cuenta personal, tendrá el formato `https://<usuario>.github.io/amazoniaink-pro/`.
+---
 
-## Resumen de herramientas incluidas
-
-1. **Quitar fondo y Knockout DTF**: selecciona el color con el cuentagotas sobre el lienzo o el selector de color. El modo **Solo Exterior** elimina las zonas conectadas al borde y conserva las áreas interiores del mismo color; **Knockout Total** busca el color en toda la imagen. Incluye tolerancia, suavizado, contracción de borde (*Choke*) y herramientas manuales para borrar o restaurar.
-2. **Semitonos (Halftone)**: ofrece **Knockout de Sombra DTF**, **Fotolito Monocromo** y **Cuatricromía CMYK simulada**. Se pueden ajustar el tamaño del punto (indicado también como LPI aproximado), los ángulos disponibles (15°, 22.5°, 45° y 75°) y la geometría (círculo, diamante, línea o cruz).
-3. **Vectorización y separación de colores**: reduce la imagen a capas de color que se pueden mostrar u ocultar. Permite descargar un SVG vectorial por capas y fotolitos individuales en PNG negro con marcas de registro.
-4. **Escalado, resolución y modo espejo**: configura dimensiones en centímetros o pulgadas y resolución de salida de 150, 300 o 600 DPI. Incluye formatos preestablecidos para pecho izquierdo, A4, A3, A3+, rollos DTF de 30 cm y 60 cm, además del volteo horizontal para modo espejo. Se conserva la imagen original para la exportación sin cambios y se muestra la resolución efectiva, no solo la resolución de remuestreo.
-5. **Montador de planchas DTF**: coloca varios diseños en planchas transparentes de 30 o 60 cm, con copias, rotación, orden y separación configurables. Calcula longitud de film y utilización estimadas; no calcula consumo de tinta ni aplica márgenes propios de cada RIP.
-6. **Base blanca**: previsualiza y descarga una máscara de opacidad separada con choke ajustable. La máscara es un PNG aparte y solo es utilizable en flujos cuyo RIP permita alinear/interpretar esa separación.
-7. **Proyectos locales**: guarda y restaura historial, archivo original y controles en IndexedDB del mismo navegador, usando el nombre del archivo activo como identificador.
-8. **Exportación**: descarga PNG, JPEG o WEBP con ajustes de fondo, nombre de archivo y preset de producción; el flujo usa Blob/Worker cuando está disponible, incorpora metadatos PNG de densidad física y rechaza salidas que excedan límites seguros del navegador en vez de recortarlas silenciosamente.
-
-## Uso básico
-
-1. Sube una imagen PNG, JPEG o WebP, o selecciona uno de los diseños de ejemplo.
-2. Usa las pestañas del flujo de trabajo para quitar el fondo, aplicar semitonos, vectorizar o ajustar el tamaño.
-3. Pulsa **Fijar en lienzo** o **Aplicar** en las herramientas correspondientes para incorporar los cambios al diseño.
-4. Ajusta tamaño y resolución, revisa los DPI efectivos y descarga el PNG, SVG o los fotolitos que necesites. Para una plancha DTF, añade los diseños, comprueba el ancho del rollo y verifica el PNG en tu RIP antes de producir.
-
-## Tecnologías
-
-- React
-- Vite
-- Tailwind CSS
-- lucide-react
-
-El procesamiento de imágenes se realiza en el navegador; no se necesita un servicio backend para ejecutar la aplicación.
-
-## Verificación
-
-Ejecuta `npm test` para validar los cálculos de tamaño físico, los límites de exportación, los metadatos PNG, el montador de planchas y la máscara de base blanca. Usa `npm run build` para comprobar la compilación de producción.
+<div align="center">
+  <sub>Desarrollado con precisión para la industria gráfica y textil • <strong>AmazoniaInk® Pro</strong></sub>
+</div>
