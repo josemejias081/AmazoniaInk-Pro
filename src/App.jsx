@@ -8,10 +8,15 @@ import {
   Droplet, Sun, Contrast, Move, HelpCircle, FileImage
 } from 'lucide-react';
 import { addPngPhysicalResolutionToBlob, calculateEffectiveDpi, calculateRasterSize } from './utils/printProduction.js';
-import GangSheet from './GangSheet.jsx';
+import GangSheet, { makeGangEntry } from './GangSheet.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
-import { getProject, saveProject } from './utils/projectStore.js';
-import { removeBackground } from './utils/backgroundRemoval.js';
+import { deleteProject, getProject, listProjects, saveProject } from './utils/projectStore.js';
+import { removeBackground, hexToRgb, rgbToHex } from './utils/backgroundRemoval.js';
+
+const MAX_HISTORY_STEPS = 20;
+const MAX_WORKING_DIMENSION = 2400;
+const MAX_SOURCE_DIMENSION = 16000;
+const MAX_SOURCE_PIXELS = 40_000_000;
 
 // ============================================================================
 // GENERADORES DE GRÁFICOS DE PRUEBA (PROCEDURAL ARTWORK)
@@ -360,26 +365,15 @@ const generateSampleArtwork = (type) => {
 // ============================================================================
 // UTILIDADES DE COLOR Y VECTORIZACIÓN (RLE SCANLINE SVG + K-MEANS)
 // ============================================================================
-const rgbToHex = (r, g, b) =>
-  '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
-
-const hexToRgb = (hex) => {
-  const clean = hex.replace('#', '');
-  const num = parseInt(clean, 16);
-  return {
-    r: (num >> 16) & 255,
-    g: (num >> 8) & 255,
-    b: num & 255
-  };
-};
-
-
 // Genera un archivo SVG vectorial limpio y compacto usando barras horizontales unificadas por capa de color
-const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false) => {
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" shape-rendering="crispEdges">\n`;
+const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false, physicalDims = null) => {
+  const widthAttr = physicalDims ? `${physicalDims.width}${physicalDims.unit}` : `${w}`;
+  const heightAttr = physicalDims ? `${physicalDims.height}${physicalDims.unit}` : `${h}`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${widthAttr}" height="${heightAttr}" shape-rendering="crispEdges">\n`;
 
   layers.forEach((layer, idx) => {
     if (!layer.visible) return;
+    const safeHex = /^#[0-9a-f]{6}$/i.test(layer.hex) ? layer.hex : '#000000';
     let d = '';
     for (let y = 0; y < h; y++) {
       let x = 0;
@@ -398,8 +392,8 @@ const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false) => {
       }
     }
     if (d.length > 0) {
-      svg += `  <g id="capa-${idx + 1}-${layer.hex.replace('#', '')}">\n`;
-      svg += `    <path fill="${layer.hex}" d="${d}" />\n`;
+      svg += `  <g id="capa-${idx + 1}-${safeHex.replace('#', '')}">\n`;
+      svg += `    <path fill="${safeHex}" d="${d}" />\n`;
       svg += `  </g>\n`;
     }
   });
@@ -417,6 +411,7 @@ const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false) => {
     ];
     svg += `  <g id="marcas-registro" stroke="#000000" stroke-width="2" fill="none">\n`;
     pts.forEach(([cx, cy]) => {
+      svg += `    <circle cx="${cx}" cy="${cy}" r="${Math.round(r * 0.6)}" />\n`;
       svg += `    <circle cx="${cx}" cy="${cy}" r="${r}" />\n`;
       svg += `    <line x1="${cx - Math.round(r * 1.6)}" y1="${cy}" x2="${cx + Math.round(r * 1.6)}" y2="${cy}" />\n`;
       svg += `    <line x1="${cx}" y1="${cy - Math.round(r * 1.6)}" x2="${cx}" y2="${cy + Math.round(r * 1.6)}" />\n`;
@@ -442,26 +437,32 @@ const drawRegistrationMarksOnCanvas = (ctx, width, height, color = '#000000') =>
   ];
 
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 2;
-
   positions.forEach(([cx, cy]) => {
-    // Fondo blanco circular para asegurar contraste
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
-    ctx.stroke();
+    const strokeTarget = () => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
 
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
 
-    ctx.beginPath();
-    ctx.moveTo(cx - r * 1.6, cy);
-    ctx.lineTo(cx + r * 1.6, cy);
-    ctx.moveTo(cx, cy - r * 1.6);
-    ctx.lineTo(cx, cy + r * 1.6);
-    ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 1.6, cy);
+      ctx.lineTo(cx + r * 1.6, cy);
+      ctx.moveTo(cx, cy - r * 1.6);
+      ctx.lineTo(cx, cy + r * 1.6);
+      ctx.stroke();
+    };
+
+    // Halo de contraste para asegurar visibilidad sobre fondos claros y oscuros
+    ctx.strokeStyle = color === '#34d399' ? 'rgba(0, 0, 0, 0.75)' : 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 4;
+    strokeTarget();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    strokeTarget();
   });
   ctx.restore();
 };
@@ -481,6 +482,23 @@ export default function App() {
   const [sourceOriginalFile, setSourceOriginalFile] = useState(null);
   const [activePresetName, setActivePresetName] = useState('Tigre Retro DTF');
   const [savedProjectName, setSavedProjectName] = useState('');
+  const [savedProjectsList, setSavedProjectsList] = useState([]);
+
+  // Estado persistente para la Plancha DTF (evita perder el trabajo al cambiar de pestaña)
+  const [gangSheetState, setGangSheetState] = useState({
+    sheetWidthCm: 30,
+    dpi: 300,
+    gapMm: 5,
+    cutLines: true,
+    exportCutLines: false,
+    entries: [],
+    initialized: false
+  });
+
+  // Control de vista previa pendiente por módulo (evita doble aplicación al pulsar "Aplicar")
+  const [bgPreviewPending, setBgPreviewPending] = useState(true);
+  const [htPreviewPending, setHtPreviewPending] = useState(true);
+  const [vecPreviewPending, setVecPreviewPending] = useState(true);
 
   // Vista del Lienzo y Simulación de Prenda
   const [zoom, setZoom] = useState(0.75);
@@ -501,9 +519,10 @@ export default function App() {
   const [bgChoke, setBgChoke] = useState(1); // Contracción de bordes (0 a 4 px)
   const [bgContiguous, setBgContiguous] = useState(true); // Solo bordes exteriores vs Knockout en toda la imagen
   const [bgInteractionMode, setBgInteractionMode] = useState('picker'); // 'picker' | 'eraser' | 'restore'
-  const [bgBrushMode, setBgBrushMode] = useState('erase');
   const [brushSize, setBrushSize] = useState(28);
   const isDrawingBrushRef = useRef(false);
+  const workingBrushImageRef = useRef(null);
+  const hasBrushDrawnRef = useRef(false);
 
   // --------------------------------------------------------------------------
   // 2. ESTADO: SEMITONOS (HALFTONE DTF & SERIGRAFÍA)
@@ -529,7 +548,6 @@ export default function App() {
   const [vecSmoothness, setVecSmoothness] = useState(1); // 0 = nítido, 1 = suave, 2 = ultra limpio
   const [vecIgnoreTransparent, setVecIgnoreTransparent] = useState(true);
   const [vecLayers, setVecLayers] = useState([]); // [{ hex, originalHex, visible, count, percentage }]
-  const [vecSvgString, setVecSvgString] = useState('');
   const [vecRegMarks, setVecRegMarks] = useState(false);
   const vecDataRef = useRef(null); // Guarda { labelMap, width, height }
 
@@ -566,16 +584,30 @@ export default function App() {
     }, 3400);
   }, []);
 
-  // Guardar estado en el historial
-  const pushToHistory = useCallback((imageData, label = 'Edición') => {
+  const refreshSavedProjects = useCallback(async () => {
+    try {
+      const list = await listProjects();
+      setSavedProjectsList(list);
+    } catch {
+      // Ignorar silenciosamente si IndexedDB no está disponible en el entorno
+    }
+  }, []);
+
+  // Guardar estado en el historial (conservando siempre history[0] para Restaurar y Antes/Después)
+  const pushToHistory = useCallback((imageData, label = 'Edición', toolId = 'edit', replaceCurrent = false) => {
     setHistory(prev => {
-      const sliced = prev.slice(0, historyIndex + 1);
+      const baseSlice = replaceCurrent && historyIndex > 0
+        ? prev.slice(0, historyIndex)
+        : prev.slice(0, historyIndex + 1);
       const clone = new ImageData(
         new Uint8ClampedArray(imageData.data),
         imageData.width,
         imageData.height
       );
-      const next = [...sliced, { imageData: clone, label }];
+      const combined = [...baseSlice, { imageData: clone, label, toolId }];
+      const next = combined.length > MAX_HISTORY_STEPS
+        ? [combined[0], ...combined.slice(combined.length - (MAX_HISTORY_STEPS - 1))]
+        : combined;
       setHistoryIndex(next.length - 1);
       return next;
     });
@@ -593,16 +625,26 @@ export default function App() {
     setBgTargetColor(rgbToHex(r, g, b));
 
     const clone = new ImageData(new Uint8ClampedArray(imgData.data), imgData.width, imgData.height);
-    setHistory([{ imageData: clone, label: `Original: ${title}` }]);
+    setHistory([{ imageData: clone, label: `Original: ${title}`, toolId: 'source' }]);
     setHistoryIndex(0);
     setImageSize({ width: imgData.width, height: imgData.height });
     setSourcePixelSize({ width: imgData.width, height: imgData.height });
     setSourceOriginalFile(null);
     setActivePresetName(title);
     setSavedProjectName(title);
+    setBgPreviewPending(true);
+    setHtPreviewPending(true);
+    setVecPreviewPending(true);
     setPrintUnit('cm');
     setPrintWidthCm(25);
     setPrintHeightCm(25);
+    setGangSheetState(prev => ({
+      ...prev,
+      initialized: true,
+      entries: prev.entries.some(e => !e.isCurrentDesign)
+        ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData: clone, name: title } : e)
+        : [makeGangEntry(clone, title, true)]
+    }));
 
     if (type === 'tiger') setBgPreviewMode('shirt-black');
     else if (type === 'sunset') setBgPreviewMode('checker');
@@ -613,10 +655,12 @@ export default function App() {
 
   useEffect(() => {
     loadSamplePreset('tiger', 'Tigre Retro DTF');
-  }, []);
+    refreshSavedProjects();
+  }, [loadSamplePreset, refreshSavedProjects]);
 
   // Imagen base actual desde el historial
-  const currentBaseImageData = history[historyIndex]?.imageData || null;
+  const currentHistoryEntry = history[historyIndex] || null;
+  const currentBaseImageData = currentHistoryEntry?.imageData || null;
   const originalFirstImageData = history[0]?.imageData || null;
 
   const isImageFullyOpaque = useMemo(() => {
@@ -647,15 +691,27 @@ export default function App() {
       const bitmap = await createImageBitmap(file);
       const sourceWidth = bitmap.width;
       const sourceHeight = bitmap.height;
-      const maxDim = 1100;
-      const scale = Math.min(1, maxDim / Math.max(sourceWidth, sourceHeight));
+      if (
+        sourceWidth > MAX_SOURCE_DIMENSION ||
+        sourceHeight > MAX_SOURCE_DIMENSION ||
+        sourceWidth * sourceHeight > MAX_SOURCE_PIXELS
+      ) {
+        bitmap.close();
+        throw new RangeError(
+          `La imagen (${sourceWidth}×${sourceHeight} px) supera el límite seguro de 40 megapíxeles.`
+        );
+      }
+      const scale = Math.min(1, MAX_WORKING_DIMENSION / Math.max(sourceWidth, sourceHeight));
       const width = Math.max(1, Math.round(sourceWidth * scale));
       const height = Math.max(1, Math.round(sourceHeight * scale));
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) throw new Error('El navegador no pudo leer la imagen.');
+      if (!context) {
+        bitmap.close();
+        throw new Error('El navegador no pudo leer la imagen.');
+      }
       context.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
       const imageData = context.getImageData(0, 0, width, height);
@@ -674,19 +730,29 @@ export default function App() {
           imageData.data[opaqueCorner + 2]
         ));
       }
-      setHistory([{ imageData, label: file.name }]);
+      setHistory([{ imageData, label: file.name, toolId: 'source' }]);
       setHistoryIndex(0);
       setImageSize({ width, height });
       setSourcePixelSize({ width: sourceWidth, height: sourceHeight });
       setSourceOriginalFile(file);
       setActivePresetName(file.name);
       setSavedProjectName(file.name);
+      setBgPreviewPending(true);
+      setHtPreviewPending(true);
+      setVecPreviewPending(true);
       setActiveTab('bg');
       setBgInteractionMode('picker');
       const ratio = height / width;
       setPrintUnit('cm');
       setPrintWidthCm(25);
       setPrintHeightCm(Number((25 * ratio).toFixed(1)));
+      setGangSheetState(prev => ({
+        ...prev,
+        initialized: true,
+        entries: prev.entries.some(e => !e.isCurrentDesign)
+          ? prev.entries.map(e => e.isCurrentDesign ? { ...e, imageData, name: file.name } : e)
+          : [makeGangEntry(imageData, file.name, true)]
+      }));
       showToast(`Imagen "${file.name}" cargada (${sourceWidth}×${sourceHeight} px originales)`);
     } catch (error) {
       console.error('Image upload failed:', error);
@@ -724,10 +790,12 @@ export default function App() {
     try {
       await saveProject({
         id,
+        projectName,
         savedAt: new Date().toISOString(),
         activePresetName,
         history: history.map(entry => ({
           label: entry.label,
+          toolId: entry.toolId || 'edit',
           imageData: {
             width: entry.imageData.width,
             height: entry.imageData.height,
@@ -738,6 +806,27 @@ export default function App() {
         imageSize,
         sourcePixelSize,
         sourceOriginalFile,
+        gangSheet: {
+          sheetWidthCm: gangSheetState.sheetWidthCm,
+          dpi: gangSheetState.dpi,
+          gapMm: gangSheetState.gapMm,
+          cutLines: gangSheetState.cutLines,
+          exportCutLines: gangSheetState.exportCutLines,
+          initialized: gangSheetState.initialized,
+          entries: gangSheetState.entries.map(entry => ({
+            id: entry.id,
+            name: entry.name,
+            widthCm: entry.widthCm,
+            copies: entry.copies,
+            rotation: entry.rotation,
+            isCurrentDesign: Boolean(entry.isCurrentDesign),
+            imageData: {
+              width: entry.imageData.width,
+              height: entry.imageData.height,
+              data: new Uint8ClampedArray(entry.imageData.data)
+            }
+          }))
+        },
         settings: {
           printUnit, printDpi, printWidthCm, printHeightCm, lockAspect, mirrorMode,
           sharpenFilter, exportRegMarks, exportBackgroundMode, exportFormat, exportPreset,
@@ -746,10 +835,12 @@ export default function App() {
           vecNumColors, htContrast, htThreshold, htInvert, htRemoveBlackEdges,
           htCropThreshold, htBlackPoint, htWhitePoint, htGamma, vecSmoothness,
           vecIgnoreTransparent, vecRegMarks, underbaseChoke, showUnderbasePreview,
-          bgInteractionMode, brushSize, bgPreviewMode, customShirtColor
+          bgInteractionMode, brushSize, bgPreviewMode, customShirtColor,
+          bgPreviewPending, htPreviewPending, vecPreviewPending
         }
       });
       setSavedProjectName(projectName);
+      await refreshSavedProjects();
       showToast(`Proyecto "${projectName}" guardado en este navegador.`);
     } catch (error) {
       console.error('Project save failed:', error);
@@ -757,17 +848,20 @@ export default function App() {
     }
   };
 
-  const restoreSavedProject = async () => {
-    const projectName = savedProjectName.trim() || activePresetName.trim();
+  const restoreSavedProject = async (overrideId = null) => {
+    const projectName = (typeof overrideId === 'string' && overrideId)
+      ? overrideId
+      : (savedProjectName.trim() || activePresetName.trim());
     const id = projectName.toLocaleLowerCase();
     try {
       const project = await getProject(id);
       if (!project) {
-        showToast(`No se encontró un proyecto guardado con el nombre "${activePresetName}".`, 'error');
+        showToast(`No se encontró un proyecto guardado con el nombre "${projectName}".`, 'error');
         return;
       }
       const restoredHistory = project.history.map(entry => ({
         label: entry.label,
+        toolId: entry.toolId || 'edit',
         imageData: new ImageData(
           new Uint8ClampedArray(entry.imageData.data),
           entry.imageData.width,
@@ -780,10 +874,34 @@ export default function App() {
       setHistory(restoredHistory);
       setHistoryIndex(project.historyIndex);
       setImageSize({ width: restoredHistory[project.historyIndex].imageData.width, height: restoredHistory[project.historyIndex].imageData.height });
-      setActivePresetName(project.activePresetName);
-      setSavedProjectName(project.activePresetName);
+      const displayProjectName = project.projectName || project.activePresetName || projectName;
+      setActivePresetName(project.activePresetName || displayProjectName);
+      setSavedProjectName(displayProjectName);
       setSourcePixelSize(project.sourcePixelSize);
       setSourceOriginalFile(project.sourceOriginalFile);
+      if (project.gangSheet && Array.isArray(project.gangSheet.entries)) {
+        setGangSheetState({
+          sheetWidthCm: project.gangSheet.sheetWidthCm ?? 30,
+          dpi: project.gangSheet.dpi ?? 300,
+          gapMm: project.gangSheet.gapMm ?? 5,
+          cutLines: project.gangSheet.cutLines ?? true,
+          exportCutLines: project.gangSheet.exportCutLines ?? false,
+          initialized: true,
+          entries: project.gangSheet.entries.map(entry => ({
+            id: entry.id,
+            name: entry.name,
+            widthCm: entry.widthCm,
+            copies: entry.copies,
+            rotation: entry.rotation,
+            isCurrentDesign: Boolean(entry.isCurrentDesign),
+            imageData: new ImageData(
+              new Uint8ClampedArray(entry.imageData.data),
+              entry.imageData.width,
+              entry.imageData.height
+            )
+          }))
+        });
+      }
       const settings = project.settings;
       setPrintUnit(settings.printUnit);
       setPrintDpi(settings.printDpi);
@@ -826,10 +944,23 @@ export default function App() {
       setBrushSize(settings.brushSize);
       setBgPreviewMode(settings.bgPreviewMode);
       setCustomShirtColor(settings.customShirtColor);
-      showToast(`Proyecto "${project.activePresetName}" restaurado.`);
+      setBgPreviewPending(settings.bgPreviewPending ?? false);
+      setHtPreviewPending(settings.htPreviewPending ?? false);
+      setVecPreviewPending(settings.vecPreviewPending ?? false);
+      showToast(`Proyecto "${displayProjectName}" restaurado.`);
     } catch (error) {
       console.error('Project restore failed:', error);
       showToast(`No se pudo restaurar el proyecto: ${error.message}`, 'error');
+    }
+  };
+
+  const handleDeleteSavedProject = async (id, name) => {
+    try {
+      await deleteProject(id);
+      await refreshSavedProjects();
+      showToast(`Proyecto "${name}" eliminado.`);
+    } catch (error) {
+      showToast(`No se pudo eliminar el proyecto: ${error.message}`, 'error');
     }
   };
 
@@ -1234,10 +1365,7 @@ export default function App() {
 
     vecDataRef.current = { labelMap, width: vw, height: vh };
     setVecLayers(updatedLayers);
-
-    const svgStr = buildOptimizedSVG(labelMap, vw, vh, updatedLayers, vecRegMarks);
-    setVecSvgString(svgStr);
-  }, [vecNumColors, vecSmoothness, vecIgnoreTransparent, vecRegMarks]);
+  }, [vecNumColors, vecSmoothness, vecIgnoreTransparent]);
 
   // Renderizar las capas vectorizadas de vuelta al tamaño de imagen actual
   const renderVectorPreviewToImageData = useCallback((baseData, layers) => {
@@ -1267,34 +1395,30 @@ export default function App() {
     return out;
   }, []);
 
+  // Obtiene la imagen base adecuada evitando reaplicar semitonos o vectorización sobre sí mismos
+  const getToolSourceImage = useCallback((toolId) => {
+    if (currentHistoryEntry?.toolId === toolId && historyIndex > 0) {
+      return history[historyIndex - 1].imageData;
+    }
+    return currentBaseImageData;
+  }, [currentHistoryEntry, history, historyIndex, currentBaseImageData]);
+
   // Re-calcular vectorización cuando se entra en la pestaña o cambian sus controles
   useEffect(() => {
-    if (activeTab === 'vector' && currentBaseImageData) {
-      runVectorization(currentBaseImageData);
+    const vecSource = getToolSourceImage('vector');
+    if (activeTab === 'vector' && vecSource) {
+      runVectorization(vecSource);
     }
-  }, [activeTab, vecNumColors, vecSmoothness, vecIgnoreTransparent, vecRegMarks, currentBaseImageData, runVectorization]);
+  }, [activeTab, vecNumColors, vecSmoothness, vecIgnoreTransparent, getToolSourceImage, runVectorization]);
 
-  // ==========================================================================
-  // RENDERIZADO DEL LIENZO EN TIEMPO REAL
-  // ==========================================================================
-  useEffect(() => {
-    if (!currentBaseImageData || !displayCanvasRef.current) return;
-
-    let previewData = currentBaseImageData;
-    if (activeTab === 'bg' && bgInteractionMode === 'picker') {
-      previewData = computeBackgroundRemoval(currentBaseImageData);
-    } else if (activeTab === 'halftone') {
-      previewData = computeHalftone(currentBaseImageData);
-    } else if (activeTab === 'vector' && vecLayers.length > 0) {
-      previewData = renderVectorPreviewToImageData(currentBaseImageData, vecLayers);
-    }
-
-    previewBufferRef.current = previewData;
-
+  // Función unificada para dibujar en el lienzo principal respetando Espejo, Base Blanca y Marcas de Registro
+  const renderPreviewToDisplayCanvas = useCallback((previewData) => {
     const canvas = displayCanvasRef.current;
+    if (!canvas || !previewData) return;
     canvas.width = previewData.width;
     canvas.height = previewData.height;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1331,29 +1455,69 @@ export default function App() {
       );
     }
 
-    // Lienzo de superposición "Original" para el modo Comparar Antes/Después
+    // Lienzo de superposición "Original" para el modo Comparar Antes/Después (alineado con Espejo)
     if (compareSplit && origOverlayCanvasRef.current && originalFirstImageData) {
       const oCanvas = origOverlayCanvasRef.current;
       oCanvas.width = originalFirstImageData.width;
       oCanvas.height = originalFirstImageData.height;
-      oCanvas.getContext('2d').putImageData(originalFirstImageData, 0, 0);
+      const oCtx = oCanvas.getContext('2d');
+      if (oCtx) {
+        oCtx.save();
+        oCtx.clearRect(0, 0, oCanvas.width, oCanvas.height);
+        if (mirrorMode) {
+          oCtx.translate(oCanvas.width, 0);
+          oCtx.scale(-1, 1);
+        }
+        const origTemp = document.createElement('canvas');
+        origTemp.width = originalFirstImageData.width;
+        origTemp.height = originalFirstImageData.height;
+        origTemp.getContext('2d').putImageData(originalFirstImageData, 0, 0);
+        oCtx.drawImage(origTemp, 0, 0);
+        oCtx.restore();
+      }
     }
   }, [
-    currentBaseImageData,
-    originalFirstImageData,
     activeTab,
-    bgInteractionMode,
-    computeBackgroundRemoval,
-    computeHalftone,
-    renderVectorPreviewToImageData,
-    vecLayers,
     vecRegMarks,
     exportRegMarks,
     showUnderbasePreview,
     underbaseChoke,
     mirrorMode,
     compareSplit,
-    bgPreviewMode
+    bgPreviewMode,
+    originalFirstImageData
+  ]);
+
+  // ==========================================================================
+  // RENDERIZADO DEL LIENZO EN TIEMPO REAL
+  // ==========================================================================
+  useEffect(() => {
+    if (!currentBaseImageData || !displayCanvasRef.current) return;
+
+    let previewData = currentBaseImageData;
+    if (activeTab === 'bg' && bgInteractionMode === 'picker' && bgPreviewPending) {
+      previewData = computeBackgroundRemoval(currentBaseImageData);
+    } else if (activeTab === 'halftone' && htPreviewPending) {
+      previewData = computeHalftone(getToolSourceImage('halftone'));
+    } else if (activeTab === 'vector' && vecLayers.length > 0 && vecPreviewPending) {
+      previewData = renderVectorPreviewToImageData(getToolSourceImage('vector'), vecLayers);
+    }
+
+    previewBufferRef.current = previewData;
+    renderPreviewToDisplayCanvas(previewData);
+  }, [
+    currentBaseImageData,
+    activeTab,
+    bgInteractionMode,
+    bgPreviewPending,
+    htPreviewPending,
+    vecPreviewPending,
+    computeBackgroundRemoval,
+    computeHalftone,
+    getToolSourceImage,
+    renderVectorPreviewToImageData,
+    vecLayers,
+    renderPreviewToDisplayCanvas
   ]);
 
   // ==========================================================================
@@ -1365,16 +1529,18 @@ export default function App() {
     const rect = canvas.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const x = Math.floor(((clientX - rect.left) / rect.width) * canvas.width);
-    const y = Math.floor(((clientY - rect.top) / rect.height) * canvas.height);
-    return { x, y };
+    const rawX = Math.floor(((clientX - rect.left) / rect.width) * canvas.width);
+    const rawY = Math.floor(((clientY - rect.top) / rect.height) * canvas.height);
+    const x = mirrorMode ? canvas.width - 1 - rawX : rawX;
+    return { x, y: rawY };
   };
 
   const applyManualBrushAt = (x, y) => {
-    if (!currentBaseImageData || !originalFirstImageData) return;
-    const w = currentBaseImageData.width;
-    const h = currentBaseImageData.height;
-    const data = currentBaseImageData.data;
+    const workingImage = workingBrushImageRef.current;
+    if (!workingImage || !originalFirstImageData) return;
+    const w = workingImage.width;
+    const h = workingImage.height;
+    const data = workingImage.data;
     const orig = originalFirstImageData.data;
     const r = brushSize;
 
@@ -1398,10 +1564,9 @@ export default function App() {
       }
     }
 
-    const canvas = displayCanvasRef.current;
-    if (canvas) {
-      canvas.getContext('2d').putImageData(currentBaseImageData, 0, 0);
-    }
+    hasBrushDrawnRef.current = true;
+    previewBufferRef.current = workingImage;
+    renderPreviewToDisplayCanvas(workingImage);
   };
 
   const handleCanvasPointerDown = (e) => {
@@ -1419,9 +1584,16 @@ export default function App() {
           currentBaseImageData.data[idx + 2]
         );
         setBgTargetColor(hex);
+        setBgPreviewPending(true);
         showToast(`Color de fondo seleccionado: ${hex.toUpperCase()}`);
       }
     } else {
+      workingBrushImageRef.current = new ImageData(
+        new Uint8ClampedArray(currentBaseImageData.data),
+        currentBaseImageData.width,
+        currentBaseImageData.height
+      );
+      hasBrushDrawnRef.current = false;
       isDrawingBrushRef.current = true;
       applyManualBrushAt(coords.x, coords.y);
     }
@@ -1434,50 +1606,120 @@ export default function App() {
   };
 
   const handleCanvasPointerUp = () => {
-    if (isDrawingBrushRef.current && currentBaseImageData) {
+    if (isDrawingBrushRef.current) {
       isDrawingBrushRef.current = false;
-      pushToHistory(currentBaseImageData, bgInteractionMode === 'eraser' ? 'Borrador manual' : 'Restaurar manual');
+      if (hasBrushDrawnRef.current && workingBrushImageRef.current) {
+        const committed = workingBrushImageRef.current;
+        pushToHistory(committed, bgInteractionMode === 'eraser' ? 'Borrador manual' : 'Restaurar manual', 'brush');
+        setGangSheetState(prev => ({
+          ...prev,
+          entries: prev.entries.map(item => item.isCurrentDesign ? { ...item, imageData: committed } : item)
+        }));
+      }
+      workingBrushImageRef.current = null;
+      hasBrushDrawnRef.current = false;
     }
+  };
+
+  const handleSelectBgInteractionMode = (mode) => {
+    if (mode !== 'picker' && bgInteractionMode === 'picker' && bgPreviewPending && previewBufferRef.current) {
+      const committed = previewBufferRef.current;
+      pushToHistory(committed, 'Recorte de Fondo', 'bg');
+      setBgPreviewPending(false);
+      setGangSheetState(prev => ({
+        ...prev,
+        entries: prev.entries.map(item => item.isCurrentDesign ? { ...item, imageData: committed } : item)
+      }));
+    }
+    setBgInteractionMode(mode);
   };
 
   // ==========================================================================
   // APLICAR CAMBIOS DE CADA HERRAMIENTA AL HISTORIAL
   // ==========================================================================
-  const applyCurrentToolChanges = (label) => {
+  const applyCurrentToolChanges = (label, toolId = activeTab) => {
     if (!previewBufferRef.current) return;
-    pushToHistory(previewBufferRef.current, label);
+    const committed = new ImageData(
+      new Uint8ClampedArray(previewBufferRef.current.data),
+      previewBufferRef.current.width,
+      previewBufferRef.current.height
+    );
+    const shouldReplaceCurrent = (toolId === 'halftone' || toolId === 'vector') && currentHistoryEntry?.toolId === toolId;
+    pushToHistory(committed, label, toolId, shouldReplaceCurrent);
+    if (toolId === 'bg') setBgPreviewPending(false);
+    if (toolId === 'halftone') setHtPreviewPending(false);
+    if (toolId === 'vector') setVecPreviewPending(false);
+    setGangSheetState(prev => ({
+      ...prev,
+      entries: prev.entries.map(item => item.isCurrentDesign ? { ...item, imageData: committed } : item)
+    }));
     showToast(`¡${label} aplicado al diseño! Puedes seguir editando en otros pasos.`);
   };
 
   const downloadHalftonePNG = async () => {
-    if (!currentBaseImageData) return;
-    const halftoneData = computeHalftone(currentBaseImageData);
+    const htSource = getToolSourceImage('halftone');
+    if (!htSource) return;
+    const halftoneData = (currentHistoryEntry?.toolId === 'halftone' && !htPreviewPending)
+      ? currentBaseImageData
+      : computeHalftone(htSource);
     if (!halftoneData) return;
 
     try {
+      const inchesW = printUnit === 'cm' ? printWidthCm / 2.54 : printWidthCm;
+      const inchesH = printUnit === 'cm' ? printHeightCm / 2.54 : printHeightCm;
+      const exportDpi = printDpi || 300;
+      let outW = halftoneData.width;
+      let outH = halftoneData.height;
+      try {
+        const sized = calculateRasterSize(inchesW, inchesH, exportDpi);
+        outW = sized.width;
+        outH = sized.height;
+      } catch {
+        // Fallback al tamaño nativo del semitono si las dimensiones físicas exceden el límite
+      }
+
+      const srcCanvas = document.createElement('canvas');
+      srcCanvas.width = halftoneData.width;
+      srcCanvas.height = halftoneData.height;
+      srcCanvas.getContext('2d').putImageData(halftoneData, 0, 0);
+
       const canvas = document.createElement('canvas');
-      canvas.width = halftoneData.width;
-      canvas.height = halftoneData.height;
+      canvas.width = outW;
+      canvas.height = outH;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('No se pudo inicializar el lienzo para el semitono.');
-      ctx.putImageData(halftoneData, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.save();
+      if (mirrorMode) {
+        ctx.translate(outW, 0);
+        ctx.scale(-1, 1);
+      }
+      ctx.drawImage(srcCanvas, 0, 0, outW, outH);
+      ctx.restore();
 
       const blob = await new Promise((resolve, reject) => {
         canvas.toBlob(b => b ? resolve(b) : reject(new Error('Falló la codificación PNG.')), 'image/png');
       });
-      const resolvedBlob = await addPngPhysicalResolutionToBlob(blob, printDpi || 300);
+      const resolvedBlob = await addPngPhysicalResolutionToBlob(blob, exportDpi);
       const url = URL.createObjectURL(resolvedBlob);
       const link = document.createElement('a');
-      link.download = `${activePresetName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_semitono_${printDpi || 300}DPI.png`;
+      link.download = `${activePresetName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_semitono_${exportDpi}DPI${mirrorMode ? '_ESPEJO' : ''}.png`;
       link.href = url;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast(`PNG de semitono exportado con metadatos de ${printDpi || 300} DPI`);
+      showToast(`PNG de semitono exportado (${outW}×${outH} px a ${exportDpi} DPI)`);
     } catch (error) {
       console.error('Halftone export failed:', error);
       showToast(`No se pudo exportar el semitono: ${error.message}`, 'error');
     }
   };
+
+  // Determina si hay una vista previa activa sin aplicar en la pestaña actual
+  const hasUnappliedActivePreview = Boolean(
+    (activeTab === 'bg' && bgInteractionMode === 'picker' && bgPreviewPending) ||
+    (activeTab === 'halftone' && htPreviewPending) ||
+    (activeTab === 'vector' && vecPreviewPending)
+  );
 
   // ==========================================================================
   // EXPORTACIÓN PROFESIONAL (PNG 300 DPI, SVG VECTORIAL, SEPARACIONES)
@@ -1493,7 +1735,7 @@ export default function App() {
       const { width: targetPxW, height: targetPxH } = calculateRasterSize(inchesW, inchesH, printDpi);
       const backgroundColor = exportBackgroundMode === 'white' ? '#ffffff' : exportBackgroundMode === 'black' ? '#000000' : null;
       const useOriginalFile = Boolean(
-        sourceOriginalFile && historyIndex === 0 && !['bg', 'halftone', 'vector'].includes(activeTab)
+        sourceOriginalFile && historyIndex === 0 && !hasUnappliedActivePreview
       );
       const useWorker = typeof Worker !== 'undefined' &&
         typeof OffscreenCanvas !== 'undefined' &&
@@ -1615,26 +1857,39 @@ export default function App() {
     if (!sourceData) return;
     try {
       const { width, height } = calculateRasterSize(printWidthInches, printHeightInches, printDpi);
-      const underbaseData = createWhiteUnderbasePreview(sourceData, underbaseChoke);
       const input = document.createElement('canvas');
-      input.width = underbaseData.width;
-      input.height = underbaseData.height;
+      input.width = sourceData.width;
+      input.height = sourceData.height;
       const inputContext = input.getContext('2d');
       if (!inputContext) throw new Error('No se pudo preparar la base blanca.');
-      inputContext.putImageData(underbaseData, 0, 0);
+      inputContext.putImageData(sourceData, 0, 0);
+
+      // Escalar primero al tamaño de exportación y aplicar la contracción (choke) a resolución final
+      // para obtener una máscara nítida sin bordes grises interpolados
+      const scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = width;
+      scaledCanvas.height = height;
+      const scaledCtx = scaledCanvas.getContext('2d', { willReadFrequently: true });
+      if (!scaledCtx) throw new Error('No se pudo escalar el diseño para la base blanca.');
+      scaledCtx.imageSmoothingEnabled = sharpenFilter;
+      scaledCtx.imageSmoothingQuality = 'high';
+      scaledCtx.save();
+      if (mirrorMode) {
+        scaledCtx.translate(width, 0);
+        scaledCtx.scale(-1, 1);
+      }
+      scaledCtx.drawImage(input, 0, 0, width, height);
+      scaledCtx.restore();
+
+      const scaledData = scaledCtx.getImageData(0, 0, width, height);
+      const underbaseData = createWhiteUnderbasePreview(scaledData, underbaseChoke);
 
       const output = document.createElement('canvas');
       output.width = width;
       output.height = height;
       const context = output.getContext('2d');
       if (!context) throw new Error('No se pudo crear el lienzo de la base blanca.');
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = 'high';
-      if (mirrorMode) {
-        context.translate(width, 0);
-        context.scale(-1, 1);
-      }
-      context.drawImage(input, 0, 0, width, height);
+      context.putImageData(underbaseData, 0, 0);
       if (exportRegMarks) drawRegistrationMarksOnCanvas(context, width, height, '#000000');
       const blob = await new Promise((resolve, reject) => {
         output.toBlob(value => value ? resolve(value) : reject(new Error('Falló la codificación PNG.')), 'image/png');
@@ -1646,7 +1901,7 @@ export default function App() {
       link.download = `base_blanca_${width}x${height}_${printDpi}DPI${mirrorMode ? '_ESPEJO' : ''}.png`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast('Base blanca exportada como PNG separado y alineado');
+      showToast('Base blanca exportada como PNG separado y alineado a resolución final');
     } catch (error) {
       console.error('White underbase export failed:', error);
       showToast(`No se pudo exportar la base blanca: ${error.message}`, 'error');
@@ -1655,30 +1910,48 @@ export default function App() {
 
   const downloadVectorSVG = () => {
     if (!vecDataRef.current) {
-      runVectorization(currentBaseImageData);
+      runVectorization(getToolSourceImage('vector'));
     }
     const { labelMap, width, height } = vecDataRef.current || {};
     if (!labelMap) return;
 
-    const svgContent = buildOptimizedSVG(labelMap, width, height, vecLayers, vecRegMarks);
+    const svgContent = buildOptimizedSVG(
+      labelMap,
+      width,
+      height,
+      vecLayers,
+      vecRegMarks,
+      { width: printWidthCm, height: printHeightCm, unit: printUnit }
+    );
     const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.download = `vector_serigrafia_${vecLayers.length}_colores.svg`;
     link.click();
-    URL.revokeObjectURL(url);
-    showToast('Archivo vectorial .SVG descargado correctamente');
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Archivo vectorial .SVG descargado con dimensiones físicas');
   };
 
   // Descargar fotolito individual (negro opaco + marcas de registro) de un color para quemar pantalla de serigrafía
   const downloadSingleColorPositive = async (layerIndex, hexColor) => {
     if (!vecDataRef.current || !currentBaseImageData) return;
     const { labelMap, width: vw, height: vh } = vecDataRef.current;
-    const w = currentBaseImageData.width;
-    const h = currentBaseImageData.height;
 
     try {
+      const exportDpi = printDpi || 300;
+      const inchesW = printUnit === 'cm' ? printWidthCm / 2.54 : printWidthCm;
+      const inchesH = printUnit === 'cm' ? printHeightCm / 2.54 : printHeightCm;
+      let w = currentBaseImageData.width;
+      let h = currentBaseImageData.height;
+      try {
+        const sized = calculateRasterSize(inchesW, inchesH, exportDpi);
+        w = sized.width;
+        h = sized.height;
+      } catch {
+        // Fallback al tamaño de trabajo si excede el límite del navegador
+      }
+
       const c = document.createElement('canvas');
       c.width = w;
       c.height = h;
@@ -1690,7 +1963,8 @@ export default function App() {
       for (let y = 0; y < h; y++) {
         const sy = Math.min(vh - 1, Math.floor((y / h) * vh));
         for (let x = 0; x < w; x++) {
-          const sx = Math.min(vw - 1, Math.floor((x / w) * vw));
+          const sourceX = mirrorMode ? (w - 1 - x) : x;
+          const sx = Math.min(vw - 1, Math.floor((sourceX / w) * vw));
           if (labelMap[sy * vw + sx] === layerIndex) {
             const idx = (y * w + x) * 4;
             // Fotolito en negro puro al 100% de densidad para insolación serigráfica
@@ -1704,22 +1978,31 @@ export default function App() {
       ctx.putImageData(imgData, 0, 0);
       drawRegistrationMarksOnCanvas(ctx, w, h, '#000000');
 
-      // Etiqueta técnica de la pantalla en el borde superior
+      // Etiqueta técnica de la pantalla con fondo de reserva blanco para no mezclarse con el arte
+      const fontSize = Math.max(14, Math.round(Math.min(w, h) * 0.018));
+      const labelText = `PANTALLA #${layerIndex + 1} • SPOT: ${hexColor.toUpperCase()} • ${printWidthCm}×${printHeightCm}${printUnit} @ ${exportDpi}DPI${mirrorMode ? ' (ESPEJO)' : ''}`;
+      ctx.save();
+      ctx.font = `bold ${fontSize}px monospace`;
+      const textWidth = ctx.measureText(labelText).width;
+      const boxX = Math.max(48, Math.round(w * 0.06));
+      const boxY = Math.max(8, Math.round(h * 0.01));
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillRect(boxX - 6, boxY, textWidth + 12, fontSize + 10);
       ctx.fillStyle = '#000000';
-      ctx.font = 'bold 16px monospace';
-      ctx.fillText(`PANTALLA #${layerIndex + 1} - COLOR SPOT: ${hexColor.toUpperCase()}`, 65, 28);
+      ctx.fillText(labelText, boxX, boxY + fontSize + 1);
+      ctx.restore();
 
       const blob = await new Promise((resolve, reject) => {
         c.toBlob(b => b ? resolve(b) : reject(new Error('Falló la codificación PNG del fotolito.')), 'image/png');
       });
-      const resolvedBlob = await addPngPhysicalResolutionToBlob(blob, 300);
+      const resolvedBlob = await addPngPhysicalResolutionToBlob(blob, exportDpi);
       const url = URL.createObjectURL(resolvedBlob);
       const link = document.createElement('a');
-      link.download = `fotolito_pantalla_${layerIndex + 1}_${hexColor.replace('#', '')}_300DPI.png`;
+      link.download = `fotolito_pantalla_${layerIndex + 1}_${hexColor.replace('#', '')}_${exportDpi}DPI${mirrorMode ? '_ESPEJO' : ''}.png`;
       link.href = url;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast(`Fotolito para Pantalla #${layerIndex + 1} (${hexColor}) descargado a 300 DPI con marcas de registro`);
+      showToast(`Fotolito Pantalla #${layerIndex + 1} (${hexColor}) exportado a ${exportDpi} DPI con marcas de registro`);
     } catch (error) {
       console.error('Screen positive export failed:', error);
       showToast(`No se pudo exportar el fotolito: ${error.message}`, 'error');
@@ -1738,7 +2021,7 @@ export default function App() {
   }
   const targetPixelsWidth = rasterSize?.width ?? 0;
   const targetPixelsHeight = rasterSize?.height ?? 0;
-  const effectiveSourceSize = sourceOriginalFile && historyIndex === 0 && !['bg', 'halftone', 'vector'].includes(activeTab)
+  const effectiveSourceSize = sourceOriginalFile && historyIndex === 0 && !hasUnappliedActivePreview
     ? sourcePixelSize
     : imageSize;
   const effectiveDpi = effectiveSourceSize.width > 0 && effectiveSourceSize.height > 0 && printWidthInches > 0 && printHeightInches > 0
@@ -1865,15 +2148,21 @@ export default function App() {
           </button>
           <input
             type="text"
+            list="saved-projects-datalist"
             aria-label="Nombre del proyecto guardado"
             placeholder={activePresetName}
             value={savedProjectName}
             onChange={event => setSavedProjectName(event.target.value)}
             className="w-32 rounded-lg border border-stone-700 bg-stone-950 px-2 py-2 text-xs text-stone-100 placeholder:text-stone-500"
           />
+          <datalist id="saved-projects-datalist">
+            {savedProjectsList.map(item => (
+              <option key={item.id} value={item.name} />
+            ))}
+          </datalist>
           <button
             type="button"
-            onClick={restoreSavedProject}
+            onClick={() => restoreSavedProject()}
             className="rounded-lg border border-stone-700 bg-stone-800 px-3 py-2 text-xs font-semibold text-stone-200 hover:bg-stone-700"
             title="Restaurar proyecto guardado con el nombre actual"
           >
@@ -1883,7 +2172,12 @@ export default function App() {
           {/* Undo / Redo */}
           <div className="flex items-center bg-stone-800/90 rounded-lg border border-stone-700 p-0.5">
             <button
-              onClick={() => setHistoryIndex(i => Math.max(0, i - 1))}
+              onClick={() => {
+                setBgPreviewPending(false);
+                setHtPreviewPending(false);
+                setVecPreviewPending(false);
+                setHistoryIndex(i => Math.max(0, i - 1));
+              }}
               disabled={historyIndex <= 0}
               title="Deshacer"
               className="p-1.5 rounded-md hover:bg-stone-700 disabled:opacity-30 transition"
@@ -1894,7 +2188,12 @@ export default function App() {
               {historyIndex + 1}/{history.length}
             </span>
             <button
-              onClick={() => setHistoryIndex(i => Math.min(history.length - 1, i + 1))}
+              onClick={() => {
+                setBgPreviewPending(false);
+                setHtPreviewPending(false);
+                setVecPreviewPending(false);
+                setHistoryIndex(i => Math.min(history.length - 1, i + 1));
+              }}
               disabled={historyIndex >= history.length - 1}
               title="Rehacer"
               className="p-1.5 rounded-md hover:bg-stone-700 disabled:opacity-30 transition"
@@ -2313,7 +2612,7 @@ export default function App() {
               {/* Modo de herramienta sobre el lienzo */}
               <div className="grid grid-cols-3 gap-1.5 bg-stone-950 p-1 rounded-xl border border-stone-800">
                 <button
-                  onClick={() => setBgInteractionMode('picker')}
+                  onClick={() => handleSelectBgInteractionMode('picker')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'picker'
                       ? 'bg-emerald-500 text-stone-950'
@@ -2324,7 +2623,7 @@ export default function App() {
                   <span>Cuentagotas</span>
                 </button>
                 <button
-                  onClick={() => setBgInteractionMode('eraser')}
+                  onClick={() => handleSelectBgInteractionMode('eraser')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'eraser'
                       ? 'bg-emerald-500 text-stone-950'
@@ -2335,7 +2634,7 @@ export default function App() {
                   <span>Borrador</span>
                 </button>
                 <button
-                  onClick={() => setBgInteractionMode('restore')}
+                  onClick={() => handleSelectBgInteractionMode('restore')}
                   className={`py-2 px-2 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition ${
                     bgInteractionMode === 'restore'
                       ? 'bg-emerald-500 text-stone-950'
@@ -2359,7 +2658,10 @@ export default function App() {
                         <input
                           type="color"
                           value={bgTargetColor}
-                          onChange={(e) => setBgTargetColor(e.target.value)}
+                          onChange={(e) => {
+                            setBgTargetColor(e.target.value);
+                            setBgPreviewPending(true);
+                          }}
                           className="w-7 h-7 rounded cursor-pointer bg-transparent border-0"
                         />
                         <span className="text-xs font-mono text-emerald-400 uppercase">
@@ -2371,14 +2673,20 @@ export default function App() {
                     {/* Botones rápidos de color típico */}
                     <div className="flex items-center gap-1.5 pt-1">
                       <button
-                        onClick={() => setBgTargetColor('#ffffff')}
+                        onClick={() => {
+                          setBgTargetColor('#ffffff');
+                          setBgPreviewPending(true);
+                        }}
                         className="flex-1 py-1.5 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-[11px] font-medium text-stone-200 flex items-center justify-center gap-1.5"
                       >
                         <span className="w-3 h-3 rounded-full bg-white border border-stone-400" />
                         Fondo Blanco
                       </button>
                       <button
-                        onClick={() => setBgTargetColor('#000000')}
+                        onClick={() => {
+                          setBgTargetColor('#000000');
+                          setBgPreviewPending(true);
+                        }}
                         className="flex-1 py-1.5 px-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-[11px] font-medium text-stone-200 flex items-center justify-center gap-1.5"
                       >
                         <span className="w-3 h-3 rounded-full bg-black border border-stone-600" />
@@ -2394,7 +2702,10 @@ export default function App() {
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => setBgContiguous(true)}
+                        onClick={() => {
+                          setBgContiguous(true);
+                          setBgPreviewPending(true);
+                        }}
                         className={`p-2.5 rounded-lg border text-left transition ${
                           bgContiguous
                             ? 'bg-emerald-500/15 border-emerald-500 text-white'
@@ -2407,7 +2718,10 @@ export default function App() {
                         </div>
                       </button>
                       <button
-                        onClick={() => setBgContiguous(false)}
+                        onClick={() => {
+                          setBgContiguous(false);
+                          setBgPreviewPending(true);
+                        }}
                         className={`p-2.5 rounded-lg border text-left transition ${
                           !bgContiguous
                             ? 'bg-emerald-500/15 border-emerald-500 text-white'
@@ -2434,7 +2748,10 @@ export default function App() {
                         min="1"
                         max="85"
                         value={bgTolerance}
-                        onChange={(e) => setBgTolerance(Number(e.target.value))}
+                        onChange={(e) => {
+                          setBgTolerance(Number(e.target.value));
+                          setBgPreviewPending(true);
+                        }}
                         className="w-full accent-emerald-400"
                       />
                     </div>
@@ -2449,7 +2766,10 @@ export default function App() {
                         min="0"
                         max="50"
                         value={bgFeather}
-                        onChange={(e) => setBgFeather(Number(e.target.value))}
+                        onChange={(e) => {
+                          setBgFeather(Number(e.target.value));
+                          setBgPreviewPending(true);
+                        }}
                         className="w-full accent-emerald-400"
                       />
                     </div>
@@ -2466,7 +2786,10 @@ export default function App() {
                         min="0"
                         max="4"
                         value={bgChoke}
-                        onChange={(e) => setBgChoke(Number(e.target.value))}
+                        onChange={(e) => {
+                          setBgChoke(Number(e.target.value));
+                          setBgPreviewPending(true);
+                        }}
                         className="w-full accent-emerald-400"
                       />
                       <p className="text-[11px] text-stone-500 mt-1">
@@ -2476,11 +2799,12 @@ export default function App() {
                   </div>
 
                   <button
-                    onClick={() => applyCurrentToolChanges('Recorte de Fondo')}
-                    className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
+                    onClick={() => applyCurrentToolChanges('Recorte de Fondo', 'bg')}
+                    disabled={!bgPreviewPending}
+                    className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
                   >
                     <Check className="w-4 h-4" />
-                    <span>Aplicar Recorte de Fondo al Diseño</span>
+                    <span>{bgPreviewPending ? 'Aplicar Recorte de Fondo al Diseño' : 'Recorte de Fondo Aplicado'}</span>
                   </button>
                 </>
               ) : (
@@ -2510,7 +2834,13 @@ export default function App() {
             </div>
           )}
           {activeTab === 'gangsheet' && (
-            <GangSheet currentImageData={previewBufferRef.current || currentBaseImageData} showToast={showToast} />
+            <GangSheet
+              currentImageData={previewBufferRef.current || currentBaseImageData}
+              activeDesignName={activePresetName}
+              showToast={showToast}
+              persistedState={gangSheetState}
+              onStateChange={setGangSheetState}
+            />
           )}
 
           {/* ================================================================
@@ -2555,6 +2885,7 @@ export default function App() {
                     onClick={() => {
                       setHtMode(m.id);
                       if (m.id === 'cmyk') setHtMethod('halftone');
+                      setHtPreviewPending(true);
                     }}
                     className={`w-full p-3 rounded-xl border text-left transition ${
                       htMode === m.id
@@ -2574,7 +2905,10 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={htRemoveBlackEdges}
-                    onChange={(e) => setHtRemoveBlackEdges(e.target.checked)}
+                    onChange={(e) => {
+                      setHtRemoveBlackEdges(e.target.checked);
+                      setHtPreviewPending(true);
+                    }}
                     className="w-4 h-4 accent-emerald-400 rounded"
                   />
                 </label>
@@ -2592,7 +2926,10 @@ export default function App() {
                       min="0"
                       max="100"
                       value={htCropThreshold}
-                      onChange={(e) => setHtCropThreshold(Number(e.target.value))}
+                      onChange={(e) => {
+                        setHtCropThreshold(Number(e.target.value));
+                        setHtPreviewPending(true);
+                      }}
                       className="w-full accent-emerald-400"
                     />
                   </div>
@@ -2607,6 +2944,7 @@ export default function App() {
                       setHtBlackPoint(0);
                       setHtWhitePoint(255);
                       setHtGamma(1);
+                      setHtPreviewPending(true);
                     }}
                     className="text-[10px] text-emerald-400 hover:text-emerald-300"
                   >
@@ -2623,6 +2961,7 @@ export default function App() {
                     setValue: (value) => {
                       setHtBlackPoint(value);
                       if (value >= htWhitePoint) setHtWhitePoint(Math.min(255, value + 1));
+                      setHtPreviewPending(true);
                     }
                   },
                   {
@@ -2634,6 +2973,7 @@ export default function App() {
                     setValue: (value) => {
                       setHtWhitePoint(value);
                       if (value <= htBlackPoint) setHtBlackPoint(Math.max(0, value - 1));
+                      setHtPreviewPending(true);
                     }
                   }
                 ].map((control) => (
@@ -2663,7 +3003,10 @@ export default function App() {
                     max="3"
                     step="0.1"
                     value={htGamma}
-                    onChange={(e) => setHtGamma(Number(e.target.value))}
+                    onChange={(e) => {
+                      setHtGamma(Number(e.target.value));
+                      setHtPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                 </div>
@@ -2688,7 +3031,10 @@ export default function App() {
                         key={method.id}
                         type="button"
                         disabled={htMode === 'cmyk' && method.id === 'diffusion'}
-                        onClick={() => setHtMethod(method.id)}
+                        onClick={() => {
+                          setHtMethod(method.id);
+                          setHtPreviewPending(true);
+                        }}
                         className={`py-2 rounded-lg border text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
                           htMethod === method.id
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
@@ -2706,7 +3052,7 @@ export default function App() {
                   )}
                 </fieldset>
 
-                <div>
+                <div className={htMethod === 'diffusion' ? 'opacity-45 pointer-events-none' : ''}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-stone-300 font-medium">
                       Frecuencia de Trama
@@ -2719,8 +3065,12 @@ export default function App() {
                     type="range"
                     min="5"
                     max="100"
+                    disabled={htMethod === 'diffusion'}
                     value={htFrequency}
-                    onChange={(e) => setHtFrequency(Number(e.target.value))}
+                    onChange={(e) => {
+                      setHtFrequency(Number(e.target.value));
+                      setHtPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                   <div className="flex justify-between text-[10px] text-stone-500 mt-0.5">
@@ -2730,16 +3080,22 @@ export default function App() {
                 </div>
 
                 {/* Ángulo de trama con accesos rápidos serigráficos */}
-                <div>
+                <div className={htMethod === 'diffusion' || htMode === 'cmyk' ? 'opacity-45 pointer-events-none' : ''}>
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-stone-300 font-medium">Ángulo de Trama</span>
-                    <span className="text-emerald-400 font-mono">{htAngle}°</span>
+                    <span className="text-emerald-400 font-mono">
+                      {htMode === 'cmyk' ? 'C:15° M:75° Y:0° K:45°' : `${htAngle}°`}
+                    </span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5 mb-2">
                     {[15, 22.5, 45, 75].map((ang) => (
                       <button
                         key={ang}
-                        onClick={() => setHtAngle(ang)}
+                        disabled={htMethod === 'diffusion' || htMode === 'cmyk'}
+                        onClick={() => {
+                          setHtAngle(ang);
+                          setHtPreviewPending(true);
+                        }}
                         className={`py-1 rounded text-xs font-mono border ${
                           htAngle === ang
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold'
@@ -2755,14 +3111,18 @@ export default function App() {
                     min="0"
                     max="90"
                     step="0.5"
+                    disabled={htMethod === 'diffusion' || htMode === 'cmyk'}
                     value={htAngle}
-                    onChange={(e) => setHtAngle(Number(e.target.value))}
+                    onChange={(e) => {
+                      setHtAngle(Number(e.target.value));
+                      setHtPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                 </div>
 
                 {/* Forma geométrica del punto */}
-                <div>
+                <div className={htMethod === 'diffusion' ? 'opacity-45 pointer-events-none' : ''}>
                   <label className="text-xs font-medium text-stone-300 block mb-1.5">
                     Geometría del Punto
                   </label>
@@ -2775,7 +3135,11 @@ export default function App() {
                     ].map((sh) => (
                       <button
                         key={sh.id}
-                        onClick={() => setHtShape(sh.id)}
+                        disabled={htMethod === 'diffusion'}
+                        onClick={() => {
+                          setHtShape(sh.id);
+                          setHtPreviewPending(true);
+                        }}
                         className={`py-1.5 rounded-lg text-xs font-medium border ${
                           htShape === sh.id
                             ? 'bg-emerald-500 text-stone-950 border-emerald-400 font-bold'
@@ -2801,7 +3165,10 @@ export default function App() {
                       min="10"
                       max="90"
                       value={htThreshold}
-                      onChange={(e) => setHtThreshold(Number(e.target.value))}
+                      onChange={(e) => {
+                        setHtThreshold(Number(e.target.value));
+                        setHtPreviewPending(true);
+                      }}
                       className="w-full accent-emerald-400"
                     />
                   </div>
@@ -2817,7 +3184,10 @@ export default function App() {
                     min="-50"
                     max="100"
                     value={htContrast}
-                    onChange={(e) => setHtContrast(Number(e.target.value))}
+                    onChange={(e) => {
+                      setHtContrast(Number(e.target.value));
+                      setHtPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                 </div>
@@ -2829,7 +3199,10 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={htInvert}
-                    onChange={(e) => setHtInvert(e.target.checked)}
+                    onChange={(e) => {
+                      setHtInvert(e.target.checked);
+                      setHtPreviewPending(true);
+                    }}
                     className="w-4 h-4 accent-emerald-400 rounded"
                   />
                 </label>
@@ -2843,11 +3216,12 @@ export default function App() {
                 <span>Descargar PNG transparente</span>
               </button>
               <button
-                onClick={() => applyCurrentToolChanges('Efecto Semitono')}
-                className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
+                onClick={() => applyCurrentToolChanges('Efecto Semitono', 'halftone')}
+                disabled={!htPreviewPending}
+                className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition"
               >
                 <Check className="w-4 h-4" />
-                <span>Aplicar Semitono al Diseño</span>
+                <span>{htPreviewPending ? 'Aplicar Semitono al Diseño' : 'Semitono Aplicado'}</span>
               </button>
             </div>
           )}
@@ -2882,7 +3256,10 @@ export default function App() {
                     min="2"
                     max="10"
                     value={vecNumColors}
-                    onChange={(e) => setVecNumColors(Number(e.target.value))}
+                    onChange={(e) => {
+                      setVecNumColors(Number(e.target.value));
+                      setVecPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                 </div>
@@ -2899,7 +3276,10 @@ export default function App() {
                     min="0"
                     max="3"
                     value={vecSmoothness}
-                    onChange={(e) => setVecSmoothness(Number(e.target.value))}
+                    onChange={(e) => {
+                      setVecSmoothness(Number(e.target.value));
+                      setVecPreviewPending(true);
+                    }}
                     className="w-full accent-emerald-400"
                   />
                 </div>
@@ -2940,6 +3320,7 @@ export default function App() {
                             const updated = [...vecLayers];
                             updated[idx] = { ...updated[idx], hex: e.target.value };
                             setVecLayers(updated);
+                            setVecPreviewPending(true);
                           }}
                           className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
                         />
@@ -2959,6 +3340,7 @@ export default function App() {
                             const updated = [...vecLayers];
                             updated[idx] = { ...updated[idx], visible: !updated[idx].visible };
                             setVecLayers(updated);
+                            setVecPreviewPending(true);
                           }}
                           title={layer.visible ? 'Ocultar capa' : 'Mostrar capa'}
                           className={`p-1.5 rounded-md border text-xs transition ${
@@ -2984,11 +3366,12 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => applyCurrentToolChanges('Posterizado Vectorial')}
-                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 border border-stone-700 transition"
+                  onClick={() => applyCurrentToolChanges('Posterizado Vectorial', 'vector')}
+                  disabled={!vecPreviewPending}
+                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-white font-semibold text-xs flex items-center justify-center gap-1.5 border border-stone-700 transition"
                 >
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>Fijar en Lienzo</span>
+                  <span>{vecPreviewPending ? 'Fijar en Lienzo' : 'Fijado'}</span>
                 </button>
                 <button
                   onClick={downloadVectorSVG}
@@ -3450,7 +3833,7 @@ export default function App() {
             </div>
             <p className="leading-relaxed">
               Para <strong>DTF sobre camiseta negra</strong>, elimina primero el fondo negro en el paso 1 y aplica un{' '}
-              <em>Semitono Knockout DTF</em> de 10px a 22.5° en el paso 2. Obtendrás un estampado transpirable, ligero y que no se cuartea con los lavados.
+              <em>Semitono Knockout DTF</em> de 30 LPI a 22.5° en el paso 2. Obtendrás un estampado transpirable, ligero y que no se cuartea con los lavados.
             </p>
           </div>
         </aside>

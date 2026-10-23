@@ -1,11 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, Plus, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { addPngPhysicalResolutionToBlob, calculateRasterSize } from './utils/printProduction.js';
 import { layoutGangSheet } from './utils/gangSheetLayout.js';
 
 const DEFAULT_WIDTH_CM = 30;
 const DEFAULT_DPI = 300;
 const PREVIEW_MAX_WIDTH = 900;
+
+let fallbackIdCounter = 0;
+const createEntryId = () => (
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `gang-entry-${Date.now()}-${++fallbackIdCounter}`
+);
 
 const imageDataToCanvas = (imageData) => {
   const canvas = document.createElement('canvas');
@@ -17,13 +24,14 @@ const imageDataToCanvas = (imageData) => {
   return canvas;
 };
 
-const makeEntry = (imageData, name) => ({
-  id: crypto.randomUUID(),
+export const makeGangEntry = (imageData, name, isCurrentDesign = false) => ({
+  id: createEntryId(),
   imageData,
   name,
   widthCm: 10,
   copies: 1,
-  rotation: 0
+  rotation: 0,
+  isCurrentDesign
 });
 
 const drawPlacements = (context, placements, dpi, cutLines = false) => {
@@ -60,16 +68,42 @@ const drawPlacements = (context, placements, dpi, cutLines = false) => {
   });
 };
 
-export default function GangSheet({ currentImageData, showToast }) {
-  const [sheetWidthCm, setSheetWidthCm] = useState(DEFAULT_WIDTH_CM);
-  const [dpi, setDpi] = useState(DEFAULT_DPI);
-  const [gapMm, setGapMm] = useState(5);
-  const [cutLines, setCutLines] = useState(true);
-  const [entries, setEntries] = useState([]);
+export default function GangSheet({ currentImageData, activeDesignName = 'Diseño actual', showToast, persistedState, onStateChange }) {
+  const [localWidthCm, setLocalWidthCm] = useState(DEFAULT_WIDTH_CM);
+  const [localDpi, setLocalDpi] = useState(DEFAULT_DPI);
+  const [localGapMm, setLocalGapMm] = useState(5);
+  const [localCutLines, setLocalCutLines] = useState(true);
+  const [localExportCutLines, setLocalExportCutLines] = useState(false);
+  const [localEntries, setLocalEntries] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const canvasRef = useRef(null);
   const initializedRef = useRef(false);
+
+  const isControlled = Boolean(persistedState && onStateChange);
+  const sheetWidthCm = isControlled ? persistedState.sheetWidthCm : localWidthCm;
+  const dpi = isControlled ? persistedState.dpi : localDpi;
+  const gapMm = isControlled ? persistedState.gapMm : localGapMm;
+  const cutLines = isControlled ? persistedState.cutLines : localCutLines;
+  const exportCutLines = isControlled ? (persistedState.exportCutLines ?? false) : localExportCutLines;
+  const entries = isControlled ? persistedState.entries : localEntries;
+
+  const setSheetWidthCm = (value) => isControlled ? onStateChange(prev => ({ ...prev, sheetWidthCm: value })) : setLocalWidthCm(value);
+  const setDpi = (value) => isControlled ? onStateChange(prev => ({ ...prev, dpi: value })) : setLocalDpi(value);
+  const setGapMm = (value) => isControlled ? onStateChange(prev => ({ ...prev, gapMm: value })) : setLocalGapMm(value);
+  const setCutLines = (value) => isControlled ? onStateChange(prev => ({ ...prev, cutLines: value })) : setLocalCutLines(value);
+  const setExportCutLines = (value) => isControlled ? onStateChange(prev => ({ ...prev, exportCutLines: value })) : setLocalExportCutLines(value);
+  const setEntries = (updater) => {
+    if (isControlled) {
+      onStateChange(prev => ({
+        ...prev,
+        initialized: true,
+        entries: typeof updater === 'function' ? updater(prev.entries) : updater
+      }));
+    } else {
+      setLocalEntries(updater);
+    }
+  };
 
   const layout = useMemo(() => {
     if (!entries.length) return { placements: [], heightCm: 0 };
@@ -81,10 +115,11 @@ export default function GangSheet({ currentImageData, showToast }) {
   }, [entries, sheetWidthCm, gapMm]);
 
   useEffect(() => {
-    if (initializedRef.current || !currentImageData) return;
+    const alreadyInit = isControlled ? persistedState.initialized : initializedRef.current;
+    if (alreadyInit || !currentImageData) return;
     initializedRef.current = true;
-    setEntries([makeEntry(currentImageData, 'Diseño actual')]);
-  }, [currentImageData]);
+    setEntries([makeGangEntry(currentImageData, activeDesignName || 'Diseño actual', true)]);
+  }, [currentImageData, activeDesignName, isControlled, persistedState?.initialized]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -137,12 +172,28 @@ export default function GangSheet({ currentImageData, showToast }) {
         if (!context) throw new Error(`No se pudo leer ${file.name}.`);
         context.drawImage(bitmap, 0, 0);
         bitmap.close();
-        return makeEntry(context.getImageData(0, 0, canvas.width, canvas.height), file.name);
+        return makeGangEntry(context.getImageData(0, 0, canvas.width, canvas.height), file.name, false);
       }));
       setEntries(current => [...current, ...loaded]);
     } catch (loadError) {
       setError(`No se pudieron cargar las imágenes: ${loadError.message}`);
     }
+  };
+
+  const syncCurrentCanvasDesign = () => {
+    if (!currentImageData) return;
+    setEntries(current => {
+      const hasLinked = current.some(item => item.isCurrentDesign);
+      if (!hasLinked) {
+        return [...current, makeGangEntry(currentImageData, activeDesignName || 'Diseño actual', true)];
+      }
+      return current.map(item =>
+        item.isCurrentDesign
+          ? { ...item, imageData: currentImageData, name: activeDesignName || item.name }
+          : item
+      );
+    });
+    showToast('Plancha actualizada con el diseño activo del lienzo.');
   };
 
   const exportSheet = async () => {
@@ -157,7 +208,7 @@ export default function GangSheet({ currentImageData, showToast }) {
       const context = output.getContext('2d');
       if (!context) throw new Error('No se pudo crear el lienzo final.');
       context.clearRect(0, 0, width, height);
-      drawPlacements(context, layout.placements, dpi, cutLines);
+      drawPlacements(context, layout.placements, dpi, exportCutLines);
       const blob = await new Promise((resolve, reject) => {
         output.toBlob(value => value ? resolve(value) : reject(new Error('Falló la codificación PNG.')), 'image/png');
       });
@@ -225,14 +276,26 @@ export default function GangSheet({ currentImageData, showToast }) {
         </label>
         <label className="flex items-center justify-between text-xs text-stone-300 col-span-2 rounded border border-stone-800 bg-stone-900/60 p-2.5">
           <div>
-            <span className="font-semibold block text-stone-200">Guías / Líneas de corte</span>
-            <span className="text-[10px] text-stone-400">Dibuja marcas perimetrales para facilitar el corte manual con tijera o cúter</span>
+            <span className="font-semibold block text-stone-200">Guías en vista previa</span>
+            <span className="text-[10px] text-stone-400">Muestra el contorno de cada diseño en pantalla sin manchar el PNG final</span>
           </div>
           <input
             type="checkbox"
             checked={cutLines}
             onChange={event => setCutLines(event.target.checked)}
             className="w-4 h-4 accent-emerald-400"
+          />
+        </label>
+        <label className="flex items-center justify-between text-xs text-stone-300 col-span-2 rounded border border-stone-800 bg-stone-900/60 p-2.5">
+          <div>
+            <span className="font-semibold block text-stone-200">Imprimir líneas de corte en el PNG exportado</span>
+            <span className="text-[10px] text-amber-300/80">Atención: en DTF las líneas impresas reciben tinta blanca y polvo adhesivo</span>
+          </div>
+          <input
+            type="checkbox"
+            checked={exportCutLines}
+            onChange={event => setExportCutLines(event.target.checked)}
+            className="w-4 h-4 accent-amber-400"
           />
         </label>
       </div>
@@ -248,9 +311,14 @@ export default function GangSheet({ currentImageData, showToast }) {
             <button type="button" title="Eliminar diseño" className="rounded p-2 text-red-300 hover:bg-stone-800" onClick={() => setEntries(current => current.filter(item => item.id !== entry.id))}><Trash2 size={15} /></button>
           </div>
         ))}
-        <button type="button" className="flex items-center gap-2 text-xs text-emerald-300" onClick={() => currentImageData && setEntries(current => [...current, makeEntry(currentImageData, `Diseño actual ${current.length + 1}`)])}>
-          <Plus size={14} /> Añadir otra copia del diseño actual
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <button type="button" className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-emerald-200" onClick={() => currentImageData && setEntries(current => [...current, makeGangEntry(currentImageData, `${activeDesignName || 'Diseño actual'} (${current.length + 1})`, true)])}>
+            <Plus size={14} /> Añadir diseño del lienzo
+          </button>
+          <button type="button" className="flex items-center gap-1.5 text-xs text-stone-300 hover:text-white" onClick={syncCurrentCanvasDesign}>
+            <RefreshCw size={13} /> Actualizar con cambios del lienzo
+          </button>
+        </div>
       </div>
       {layout.error && <p role="alert" className="rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200">{layout.error}</p>}
       {error && <p role="alert" className="rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200">{error}</p>}

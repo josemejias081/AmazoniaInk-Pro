@@ -1,11 +1,11 @@
-export const createWhiteUnderbasePreview = (imageData, chokePixels = 0) => {
+export const createWhiteUnderbasePreview = (imageData, chokePixels = 0, alphaThreshold = 32) => {
   if (!imageData || !Number.isInteger(chokePixels) || chokePixels < 0 || chokePixels > 12) {
     throw new RangeError('A valid image and choke value from 0 to 12 pixels are required.');
   }
   const { width, height, data } = imageData;
   const mask = new Uint8Array(width * height);
   for (let pixel = 0; pixel < mask.length; pixel++) {
-    mask[pixel] = data[pixel * 4 + 3] > 8 ? 1 : 0;
+    mask[pixel] = data[pixel * 4 + 3] > alphaThreshold ? 1 : 0;
   }
 
   let current = mask;

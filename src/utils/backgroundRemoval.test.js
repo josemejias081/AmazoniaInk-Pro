@@ -99,3 +99,42 @@ test('removeBackground contiguous mode protects internal white areas', () => {
   });
   assert.equal(knockoutResult.data[innerIdx + 3], 0, 'Inner white area removed in global knockout mode');
 });
+
+test('removeBackground contiguous mode traverses already-transparent border margins and chokes border pixels', () => {
+  const w = 10;
+  const h = 10;
+  const data = new Uint8ClampedArray(w * h * 4);
+
+  // Outer 1px border is already transparent with RGB (0,0,0), while interior background (1..8) is white
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = (y * w + x) * 4;
+      data[idx] = 255;
+      data[idx + 1] = 255;
+      data[idx + 2] = 255;
+      data[idx + 3] = 255;
+    }
+  }
+
+  // Opaque red pixel at top border (x=5, y=0) next to transparent border pixels
+  const topEdgeIdx = 5 * 4;
+  data[topEdgeIdx] = 220;
+  data[topEdgeIdx + 1] = 20;
+  data[topEdgeIdx + 2] = 20;
+  data[topEdgeIdx + 3] = 255;
+
+  const result = removeBackground({ width: w, height: h, data }, {
+    targetColor: '#ffffff',
+    tolerance: 20,
+    feather: 0,
+    choke: 1,
+    contiguous: true
+  });
+
+  // Interior white background connected to transparent margin must be removed
+  const innerWhiteIdx = (5 * w + 5) * 4;
+  assert.equal(result.data[innerWhiteIdx + 3], 0);
+
+  // Opaque red pixel on top border (y=0) touching transparent neighbors must be choked
+  assert.ok(result.data[topEdgeIdx + 3] < 255, 'Border pixel adjacent to transparency should be choked');
+});

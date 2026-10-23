@@ -34,3 +34,10 @@ test('choke contracts the mask and removes edge pixels', () => withImageData(() 
 test('rejects unsupported choke values', () => {
   assert.throws(() => createWhiteUnderbasePreview({ width: 1, height: 1, data: new Uint8ClampedArray(4) }, 13), RangeError);
 });
+
+test('ignores faint anti-aliased fringe pixels below alpha threshold to prevent white DTF halos', () => withImageData(() => {
+  const input = { width: 2, height: 1, data: new Uint8ClampedArray([255, 255, 255, 16, 255, 255, 255, 180]) };
+  const output = createWhiteUnderbasePreview(input, 0);
+  assert.equal(output.data[3], 0, 'Faint fringe alpha (16) should not receive solid white underbase');
+  assert.equal(output.data[7], 255, 'Solid/semi-opaque pixel (180) should receive underbase');
+}));

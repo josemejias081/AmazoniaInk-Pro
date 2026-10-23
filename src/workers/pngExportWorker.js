@@ -8,21 +8,27 @@ const drawRegistrationMarks = (context, width, height) => {
     [width - margin, height - margin], [width / 2, margin], [width / 2, height - margin]
   ];
   context.save();
-  context.strokeStyle = '#000000';
-  context.lineWidth = 2;
   positions.forEach(([x, y]) => {
-    context.beginPath();
-    context.arc(x, y, radius * 0.6, 0, Math.PI * 2);
-    context.stroke();
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.stroke();
-    context.beginPath();
-    context.moveTo(x - radius * 1.6, y);
-    context.lineTo(x + radius * 1.6, y);
-    context.moveTo(x, y - radius * 1.6);
-    context.lineTo(x, y + radius * 1.6);
-    context.stroke();
+    const drawTarget = () => {
+      context.beginPath();
+      context.arc(x, y, radius * 0.6, 0, Math.PI * 2);
+      context.stroke();
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x - radius * 1.6, y);
+      context.lineTo(x + radius * 1.6, y);
+      context.moveTo(x, y - radius * 1.6);
+      context.lineTo(x, y + radius * 1.6);
+      context.stroke();
+    };
+    context.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    context.lineWidth = 4;
+    drawTarget();
+    context.strokeStyle = '#000000';
+    context.lineWidth = 2;
+    drawTarget();
   });
   context.restore();
 };
@@ -56,11 +62,13 @@ self.onmessage = async ({ data }) => {
       context.fillStyle = background;
       context.fillRect(0, 0, width, height);
     }
+    context.save();
     if (mirror) {
       context.translate(width, 0);
       context.scale(-1, 1);
     }
     context.drawImage(source, 0, 0, width, height);
+    context.restore();
     if (registrationMarks) drawRegistrationMarks(context, width, height);
     const blob = await output.convertToBlob({ type: format, quality });
     const result = format === 'image/png' ? await addPngPhysicalResolutionToBlob(blob, dpi) : blob;

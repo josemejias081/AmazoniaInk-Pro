@@ -47,6 +47,47 @@ const execute = async (mode, operation) => {
 
 export const saveProject = (project) => execute('readwrite', store => store.put(project));
 
+export const deleteProject = (id) => execute('readwrite', store => store.delete(id));
+
+export const listProjects = async () => {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const items = [];
+    const request = store.openCursor();
+    request.onsuccess = (event) => {
+      const cursor = event.target?.result;
+      if (cursor) {
+        const val = cursor.value;
+        items.push({
+          id: val.id,
+          name: val.projectName || val.activePresetName || val.id,
+          savedAt: val.savedAt || '',
+          imageSize: val.imageSize || null
+        });
+        cursor.continue();
+      }
+    };
+    request.onerror = () => {
+      reject(request.error || new Error('No se pudo listar los proyectos guardados.'));
+    };
+    transaction.oncomplete = () => {
+      database.close();
+      items.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+      resolve(items);
+    };
+    transaction.onerror = () => {
+      database.close();
+      reject(transaction.error || new Error('Falló la lectura de proyectos guardados.'));
+    };
+    transaction.onabort = () => {
+      database.close();
+      reject(transaction.error || new Error('Se canceló la lectura de proyectos guardados.'));
+    };
+  });
+};
+
 export const getProject = async (id) => {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {

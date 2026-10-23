@@ -44,8 +44,10 @@ export const removeBackground = (baseData, {
     const tryEnqueue = (x, y) => {
       const p = y * w + x;
       if (visited[p]) return;
-      const dist = colorDistance(p * 4);
-      if (dist <= maxDist + featherDist) {
+      const idx = p * 4;
+      const isTransparent = src[idx + 3] === 0;
+      const dist = isTransparent ? 0 : colorDistance(idx);
+      if (isTransparent || dist <= maxDist + featherDist) {
         visited[p] = 1;
         queue[tail++] = p;
       }
@@ -63,23 +65,22 @@ export const removeBackground = (baseData, {
     while (head < tail) {
       const p = queue[head++];
       const idx = p * 4;
-      const dist = colorDistance(idx);
+      const isTransparent = src[idx + 3] === 0;
+      const dist = isTransparent ? 0 : colorDistance(idx);
 
-      if (dist <= maxDist) {
+      if (isTransparent || dist <= maxDist) {
         dst[idx + 3] = 0;
       } else if (featherDist > 0 && dist <= maxDist + featherDist) {
         const factor = (dist - maxDist) / featherDist;
         dst[idx + 3] = Math.min(dst[idx + 3], Math.round(src[idx + 3] * factor));
       }
 
-      if (dist <= maxDist) {
-        const x = p % w;
-        const y = (p / w) | 0;
-        if (x > 0) tryEnqueue(x - 1, y);
-        if (x < w - 1) tryEnqueue(x + 1, y);
-        if (y > 0) tryEnqueue(x, y - 1);
-        if (y < h - 1) tryEnqueue(x, y + 1);
-      }
+      const x = p % w;
+      const y = (p / w) | 0;
+      if (x > 0) tryEnqueue(x - 1, y);
+      if (x < w - 1) tryEnqueue(x + 1, y);
+      if (y > 0) tryEnqueue(x, y - 1);
+      if (y < h - 1) tryEnqueue(x, y + 1);
     }
   } else {
     for (let i = 0; i < src.length; i += 4) {
@@ -100,18 +101,19 @@ export const removeBackground = (baseData, {
 
     for (let step = 0; step < choke; step++) {
       const nextAlpha = new Uint8ClampedArray(currentAlpha);
-      for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
           const p = y * w + x;
-          if (currentAlpha[p] === 0) continue;
+          const center = currentAlpha[p];
+          if (center === 0) continue;
           const minNeighbor = Math.min(
-            currentAlpha[p - 1],
-            currentAlpha[p + 1],
-            currentAlpha[p - w],
-            currentAlpha[p + w]
+            x > 0 ? currentAlpha[p - 1] : center,
+            x < w - 1 ? currentAlpha[p + 1] : center,
+            y > 0 ? currentAlpha[p - w] : center,
+            y < h - 1 ? currentAlpha[p + w] : center
           );
-          if (minNeighbor < currentAlpha[p]) {
-            nextAlpha[p] = Math.round((currentAlpha[p] + minNeighbor) * 0.35);
+          if (minNeighbor < center) {
+            nextAlpha[p] = Math.round((center + minNeighbor) * 0.35);
           }
         }
       }
