@@ -138,3 +138,52 @@ test('removeBackground contiguous mode traverses already-transparent border marg
   // Opaque red pixel on top border (y=0) touching transparent neighbors must be choked
   assert.ok(result.data[topEdgeIdx + 3] < 255, 'Border pixel adjacent to transparency should be choked');
 });
+
+test('removeBackground ai-subject mode removes multi-tone gradient backgrounds while preserving central subject', () => {
+  const w = 60;
+  const h = 60;
+  const data = new Uint8ClampedArray(w * h * 4);
+
+  // Multi-colored background: top half is sky blue, bottom half is grass green
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      if (y < 30) {
+        data[idx] = 120;
+        data[idx + 1] = 180;
+        data[idx + 2] = 240;
+      } else {
+        data[idx] = 60;
+        data[idx + 1] = 150;
+        data[idx + 2] = 75;
+      }
+      data[idx + 3] = 255;
+    }
+  }
+
+  // Central subject (20..40, 20..40) in warm crimson/orange (#e11d48)
+  for (let y = 20; y < 40; y++) {
+    for (let x = 20; x < 40; x++) {
+      const idx = (y * w + x) * 4;
+      data[idx] = 225;
+      data[idx + 1] = 29;
+      data[idx + 2] = 72;
+      data[idx + 3] = 255;
+    }
+  }
+
+  const result = removeBackground({ width: w, height: h, data }, {
+    mode: 'ai-subject',
+    tolerance: 35,
+    feather: 5,
+    choke: 0
+  });
+
+  // Both top sky background and bottom grass background should be removed without picking a single targetColor!
+  const skyIdx = (5 * w + 5) * 4;
+  const grassIdx = (55 * w + 55) * 4;
+  const subjectIdx = (30 * w + 30) * 4;
+  assert.equal(result.data[skyIdx + 3], 0, 'Top sky background must be removed');
+  assert.equal(result.data[grassIdx + 3], 0, 'Bottom grass background must be removed');
+  assert.equal(result.data[subjectIdx + 3], 255, 'Central subject must remain opaque');
+});

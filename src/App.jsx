@@ -12,6 +12,7 @@ import GangSheet, { makeGangEntry } from './GangSheet.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
 import { deleteProject, getProject, listProjects, saveProject } from './utils/projectStore.js';
 import { removeBackground, hexToRgb, rgbToHex } from './utils/backgroundRemoval.js';
+import { buildBezierVectorSVG } from './utils/bezierVectorizer.js';
 
 const MAX_HISTORY_STEPS = 20;
 const MAX_WORKING_DIMENSION = 2400;
@@ -54,7 +55,7 @@ const loadOfficialLogoCanvases = async () => {
     b: rawData.data[2]
   };
   const knockedOut = removeBackground(rawData, {
-    targetRgb: cornerRgb,
+    targetColor: rgbToHex(cornerRgb.r, cornerRgb.g, cornerRgb.b),
     tolerance: 28,
     feather: 10,
     contiguous: false,
@@ -181,64 +182,11 @@ const generateSampleArtwork = async (type) => {
 };
 
 // ============================================================================
-// UTILIDADES DE COLOR Y VECTORIZACIÓN (RLE SCANLINE SVG + K-MEANS)
+// UTILIDADES DE COLOR Y VECTORIZACIÓN (CURVAS BÉZIER CÚBICAS + RLE + K-MEANS)
 // ============================================================================
-// Genera un archivo SVG vectorial limpio y compacto usando barras horizontales unificadas por capa de color
-const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false, physicalDims = null) => {
-  const widthAttr = physicalDims ? `${physicalDims.width}${physicalDims.unit}` : `${w}`;
-  const heightAttr = physicalDims ? `${physicalDims.height}${physicalDims.unit}` : `${h}`;
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${widthAttr}" height="${heightAttr}" shape-rendering="crispEdges">\n`;
-
-  layers.forEach((layer, idx) => {
-    if (!layer.visible) return;
-    const safeHex = /^#[0-9a-f]{6}$/i.test(layer.hex) ? layer.hex : '#000000';
-    let d = '';
-    for (let y = 0; y < h; y++) {
-      let x = 0;
-      const rowOffset = y * w;
-      while (x < w) {
-        if (labelMap[rowOffset + x] === idx) {
-          const startX = x;
-          while (x < w && labelMap[rowOffset + x] === idx) {
-            x++;
-          }
-          const len = x - startX;
-          d += `M${startX},${y}h${len}v1h-${len}z`;
-        } else {
-          x++;
-        }
-      }
-    }
-    if (d.length > 0) {
-      svg += `  <g id="capa-${idx + 1}-${safeHex.replace('#', '')}">\n`;
-      svg += `    <path fill="${safeHex}" d="${d}" />\n`;
-      svg += `  </g>\n`;
-    }
-  });
-
-  if (includeRegMarks) {
-    const margin = Math.max(24, Math.round(Math.min(w, h) * 0.04));
-    const r = Math.max(10, Math.round(Math.min(w, h) * 0.016));
-    const pts = [
-      [margin, margin],
-      [w - margin, margin],
-      [margin, h - margin],
-      [w - margin, h - margin],
-      [Math.round(w / 2), margin],
-      [Math.round(w / 2), h - margin]
-    ];
-    svg += `  <g id="marcas-registro" stroke="#000000" stroke-width="2" fill="none">\n`;
-    pts.forEach(([cx, cy]) => {
-      svg += `    <circle cx="${cx}" cy="${cy}" r="${Math.round(r * 0.6)}" />\n`;
-      svg += `    <circle cx="${cx}" cy="${cy}" r="${r}" />\n`;
-      svg += `    <line x1="${cx - Math.round(r * 1.6)}" y1="${cy}" x2="${cx + Math.round(r * 1.6)}" y2="${cy}" />\n`;
-      svg += `    <line x1="${cx}" y1="${cy - Math.round(r * 1.6)}" x2="${cx}" y2="${cy + Math.round(r * 1.6)}" />\n`;
-    });
-    svg += `  </g>\n`;
-  }
-
-  svg += `</svg>`;
-  return svg;
+// Genera un archivo SVG vectorial profesional con curvas Bézier suaves (nodos editables en Illustrator/CorelDRAW) o barrido RLE
+const buildOptimizedSVG = (labelMap, w, h, layers, includeRegMarks = false, physicalDims = null, options = {}) => {
+  return buildBezierVectorSVG(labelMap, w, h, layers, includeRegMarks, physicalDims, options);
 };
 
 // Dibuja marcas de registro profesionales para serigrafía en un Canvas
@@ -338,6 +286,7 @@ export default function App() {
   const [bgFeather, setBgFeather] = useState(12);
   const [bgChoke, setBgChoke] = useState(1); // Contracción de bordes (0 a 4 px)
   const [bgContiguous, setBgContiguous] = useState(true); // Solo bordes exteriores vs Knockout en toda la imagen
+  const [bgMode, setBgMode] = useState('color'); // 'color' | 'ai-subject' (Segmentación CIE L*a*b* + Sobel)
   const [bgInteractionMode, setBgInteractionMode] = useState('picker'); // 'picker' | 'eraser' | 'restore'
   const [brushSize, setBrushSize] = useState(28);
   const isDrawingBrushRef = useRef(false);
@@ -369,6 +318,7 @@ export default function App() {
   const [vecIgnoreTransparent, setVecIgnoreTransparent] = useState(true);
   const [vecLayers, setVecLayers] = useState([]); // [{ hex, originalHex, visible, count, percentage }]
   const [vecRegMarks, setVecRegMarks] = useState(false);
+  const [vecPathMode, setVecPathMode] = useState('bezier'); // 'bezier' (Curvas Bézier suaves) | 'rle' (Píxel exacto)
   const vecDataRef = useRef(null); // Guarda { labelMap, width, height }
 
   // --------------------------------------------------------------------------
@@ -657,10 +607,10 @@ export default function App() {
           printUnit, printDpi, printWidthCm, printHeightCm, lockAspect, mirrorMode,
           sharpenFilter, exportRegMarks, exportBackgroundMode, exportFormat, exportPreset,
           exportQuality, exportFilenamePrefix, bgTargetColor, bgTolerance, bgFeather,
-          bgChoke, bgContiguous, htMode, htMethod, htFrequency, htAngle, htShape,
+          bgChoke, bgContiguous, bgMode, htMode, htMethod, htFrequency, htAngle, htShape,
           vecNumColors, htContrast, htThreshold, htInvert, htRemoveBlackEdges,
           htCropThreshold, htBlackPoint, htWhitePoint, htGamma, vecSmoothness,
-          vecIgnoreTransparent, vecRegMarks, underbaseChoke, showUnderbasePreview,
+          vecIgnoreTransparent, vecRegMarks, vecPathMode, underbaseChoke, showUnderbasePreview,
           bgInteractionMode, brushSize, bgPreviewMode, customShirtColor,
           bgPreviewPending, htPreviewPending, vecPreviewPending
         }
@@ -747,6 +697,7 @@ export default function App() {
       setBgFeather(settings.bgFeather);
       setBgChoke(settings.bgChoke);
       setBgContiguous(settings.bgContiguous);
+      setBgMode(settings.bgMode || 'color');
       setHtMode(settings.htMode);
       setHtMethod(settings.htMethod);
       setHtFrequency(settings.htFrequency);
@@ -764,6 +715,7 @@ export default function App() {
       setVecSmoothness(settings.vecSmoothness);
       setVecIgnoreTransparent(settings.vecIgnoreTransparent);
       setVecRegMarks(settings.vecRegMarks);
+      setVecPathMode(settings.vecPathMode || 'bezier');
       setUnderbaseChoke(settings.underbaseChoke);
       setShowUnderbasePreview(settings.showUnderbasePreview);
       setBgInteractionMode(settings.bgInteractionMode);
@@ -791,7 +743,7 @@ export default function App() {
   };
 
   // ==========================================================================
-  // MOTOR 1: ALGORITMO DE QUITAR FONDO (FLOOD FILL / KNOCKOUT + CHOKE DTF)
+  // MOTOR 1: ALGORITMO DE QUITAR FONDO (FLOOD FILL / KNOCKOUT / IA L*a*b* + SOBEL)
   // ==========================================================================
   const computeBackgroundRemoval = useCallback((baseData) => {
     return removeBackground(baseData, {
@@ -799,9 +751,10 @@ export default function App() {
       tolerance: bgTolerance,
       feather: bgFeather,
       choke: bgChoke,
-      contiguous: bgContiguous
+      contiguous: bgContiguous,
+      mode: bgMode
     });
-  }, [bgTargetColor, bgTolerance, bgFeather, bgChoke, bgContiguous]);
+  }, [bgTargetColor, bgTolerance, bgFeather, bgChoke, bgContiguous, bgMode]);
 
   // ==========================================================================
   // MOTOR 2: GENERADOR DE SEMITONOS (HALFTONE DTF, SERIGRAFÍA Y CMYK)
@@ -1747,16 +1700,21 @@ export default function App() {
       height,
       vecLayers,
       vecRegMarks,
-      { width: printWidthCm, height: printHeightCm, unit: printUnit }
+      { width: printWidthCm, height: printHeightCm, unit: printUnit },
+      { smoothness: vecSmoothness, mode: vecPathMode }
     );
     const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `vector_serigrafia_${vecLayers.length}_colores.svg`;
+    link.download = `vector_${vecPathMode === 'bezier' ? 'bezier' : 'rle'}_${vecLayers.length}_colores.svg`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('Archivo vectorial .SVG descargado con dimensiones físicas');
+    showToast(
+      vecPathMode === 'bezier'
+        ? 'SVG exportado con Curvas Bézier suaves (nodos listos para Illustrator / Plotter)'
+        : 'SVG exportado en modo Píxel RLE con dimensiones físicas'
+    );
   };
 
   // Descargar fotolito individual (negro opaco + marcas de registro) de un color para quemar pantalla de serigrafía
@@ -2562,42 +2520,63 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Modo Contiguo vs Global Knockout */}
+                  {/* Modo Contiguo vs Global Knockout vs Segmentación IA Foto Compleja */}
                   <div className="bg-stone-950/90 border border-stone-800 rounded-xl p-3.5 space-y-2">
                     <label className="text-xs font-semibold text-stone-300 block">
                       Método de Extracción
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-1.5">
                       <button
                         onClick={() => {
+                          setBgMode('color');
                           setBgContiguous(true);
                           setBgPreviewPending(true);
                         }}
-                        className={`p-2.5 rounded-lg border text-left transition ${
-                          bgContiguous
+                        className={`p-2 rounded-lg border text-left transition ${
+                          bgMode === 'color' && bgContiguous
                             ? 'bg-emerald-500/15 border-emerald-500 text-white'
                             : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
                         }`}
                       >
-                        <div className="text-xs font-bold">Solo Exterior</div>
-                        <div className="text-[10px] text-stone-400 mt-0.5">
+                        <div className="text-[11px] font-bold">Solo Exterior</div>
+                        <div className="text-[10px] text-stone-400 mt-0.5 leading-tight">
                           Protege colores iguales dentro del dibujo
                         </div>
                       </button>
                       <button
                         onClick={() => {
+                          setBgMode('color');
                           setBgContiguous(false);
                           setBgPreviewPending(true);
                         }}
-                        className={`p-2.5 rounded-lg border text-left transition ${
-                          !bgContiguous
+                        className={`p-2 rounded-lg border text-left transition ${
+                          bgMode === 'color' && !bgContiguous
                             ? 'bg-emerald-500/15 border-emerald-500 text-white'
                             : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
                         }`}
                       >
-                        <div className="text-xs font-bold">Knockout Total</div>
-                        <div className="text-[10px] text-stone-400 mt-0.5">
+                        <div className="text-[11px] font-bold">Knockout Total</div>
+                        <div className="text-[10px] text-stone-400 mt-0.5 leading-tight">
                           Borra el color en todo el diseño (DTF)
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setBgMode('ai-subject');
+                          setBgPreviewPending(true);
+                        }}
+                        className={`p-2 rounded-lg border text-left transition ${
+                          bgMode === 'ai-subject'
+                            ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>IA / Foto</span>
+                        </div>
+                        <div className="text-[10px] text-stone-400 mt-0.5 leading-tight">
+                          Segmentación CIE L*a*b* + Bordes Sobel
                         </div>
                       </button>
                     </div>
@@ -3140,6 +3119,40 @@ export default function App() {
                     }}
                     className="w-full accent-emerald-400"
                   />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-stone-300 block mb-1.5">
+                    Geometría de Trazado SVG
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => setVecPathMode('bezier')}
+                      className={`p-2 rounded-lg border text-left transition ${
+                        vecPathMode === 'bezier'
+                          ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                          : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">Curvas Bézier</div>
+                      <div className="text-[10px] text-stone-400 mt-0.5 leading-tight">
+                        Nodos suaves para Illustrator y Plotter de Corte
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setVecPathMode('rle')}
+                      className={`p-2 rounded-lg border text-left transition ${
+                        vecPathMode === 'rle'
+                          ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                          : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">Píxel RLE</div>
+                      <div className="text-[10px] text-stone-400 mt-0.5 leading-tight">
+                        Barrido exacto para serigrafía crisp
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
                 <label className="flex items-center justify-between text-xs text-stone-300 cursor-pointer">

@@ -27,7 +27,10 @@ import {
   RotateCcw,
   RotateCw,
   Scissors,
+  Send,
+  ShoppingCart,
   Sparkles,
+  SplitSquareVertical,
   Trash2,
   Undo2,
   Unlock,
@@ -36,7 +39,20 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react';
-import { addPngPhysicalResolutionToBlob, calculateRasterSize } from './utils/printProduction.js';
+import {
+  addPngPhysicalResolutionToBlob,
+  calculateMeterSegments,
+  calculateRasterSize,
+  encodeBandedRgbaToPngBlob,
+  MAX_CANVAS_DIMENSION,
+  MAX_EXPORT_PIXELS
+} from './utils/printProduction.js';
+import {
+  buildDtfOrderPayload,
+  buildWhatsAppOrderUrl,
+  calculateDtfPricingQuote,
+  submitOrderToWebhook
+} from './utils/dtfOrderManager.js';
 import { layoutGangSheet } from './utils/gangSheetLayout.js';
 
 const DEFAULT_WIDTH_CM = 58; // Estándar comercial DTF (58-60 cm)
@@ -225,14 +241,16 @@ const buildInitialCanvasItemsFromEntries = (entries, sheetWidthCm, marginCm = 0.
 };
 
 // Dibuja todos los objetos colocados en un canvas 2D para exportación PNG a tamaño físico real (DPI)
-const renderItemsToExportCanvas = (context, items, assetsMap, dpi, exportCutLines = false) => {
-  const caches = new Map();
-  items.forEach((item) => {
-    const asset = assetsMap.get(item.assetId);
-    if (asset && !caches.has(asset.id)) {
-      caches.set(asset.id, imageDataToCanvas(asset.imageData));
-    }
-  });
+const renderItemsToExportCanvas = (context, items, assetsMap, dpi, exportCutLines = false, prebuiltCaches = null) => {
+  const caches = prebuiltCaches || new Map();
+  if (!prebuiltCaches) {
+    items.forEach((item) => {
+      const asset = assetsMap.get(item.assetId);
+      if (asset && !caches.has(asset.id)) {
+        caches.set(asset.id, imageDataToCanvas(asset.imageData));
+      }
+    });
+  }
 
   items.forEach((item) => {
     const asset = assetsMap.get(item.assetId);
@@ -447,6 +465,21 @@ export default function GangSheet({
   const [contextMenu, setContextMenu] = useState(null); // { x, y, itemId }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState(null); // null | 0..1
+
+  // Pasarela Comercial de Pedido, Carrito y Tarifas por Metro Lineal (Limit D)
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [basePricePerMeter, setBasePricePerMeter] = useState(12.5);
+  const [billingMode, setBillingMode] = useState('exact'); // 'exact' | 'half-meter' | 'full-meter'
+  const [urgentProduction, setUrgentProduction] = useState(false);
+  const [taxRatePercent, setTaxRatePercent] = useState(21);
+  const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [whatsappShopPhone, setWhatsappShopPhone] = useState('');
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [orderNotes, setOrderNotes] = useState('');
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
 
   const artboardScrollRef = useRef(null);
   const artboardSurfaceRef = useRef(null);
@@ -1257,21 +1290,71 @@ export default function GangSheet({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedItemId, handleUndo, handleRedo, handleDeleteSelected, handleDuplicateSelected, updateSelectedItem]);
 
-  // Exportar la plancha final PNG a tamaño exacto (Ancho comercial 58-60 cm × Largo ocupado por los elementos)
-  const exportGangSheetPng = async () => {
-    if (!canvasItems.length || usedHeightCm <= 0) return;
-    setBusy(true);
-    setError('');
-    try {
-      const { width, height } = calculateRasterSize(sheetWidthCm / 2.54, usedHeightCm / 2.54, dpi);
+  // Renderiza cualquier tramo vertical del rollo (startCm..endCm) como PNG físico con pHYs DPI.
+  // Para planchas grandes (>16 MPx, p.ej. 1 m o 2.5 m a 300 DPI) codifica por franjas horizontales
+  // con CompressionStream('deflate') evitando agotar la memoria RAM del navegador.
+  const renderSegmentToPhysicalPngBlob = useCallback(
+    async (startCm, endCm, onProgress = null) => {
+      const segmentHeightCm = Math.max(0.5, endCm - startCm);
+      const { width, height } = calculateRasterSize(sheetWidthCm / 2.54, segmentHeightCm / 2.54, dpi);
+      const offsetYPx = (startCm / 2.54) * dpi;
+
+      // Pre-construir los lienzos de cada recurso una sola vez para no recrearlos en cada franja
+      const prebuiltCaches = new Map();
+      canvasItems.forEach((item) => {
+        const asset = assetsMap.get(item.assetId);
+        if (asset && !prebuiltCaches.has(asset.id)) {
+          prebuiltCaches.set(asset.id, imageDataToCanvas(asset.imageData));
+        }
+      });
+
+      const useBandedStreaming =
+        width * height > 16_000_000 && typeof CompressionStream !== 'undefined';
+
+      if (useBandedStreaming) {
+        const bandCanvas = document.createElement('canvas');
+        bandCanvas.width = width;
+        const bandCtx = bandCanvas.getContext('2d', { willReadFrequently: true });
+        if (!bandCtx) throw new Error('No se pudo inicializar el motor de renderizado por franjas.');
+
+        return encodeBandedRgbaToPngBlob({
+          width,
+          height,
+          dpi,
+          bandHeight: 1024,
+          onProgress,
+          renderBandRgba: (bandY, currentBandH) => {
+            if (bandCanvas.height !== currentBandH) {
+              bandCanvas.height = currentBandH;
+            } else {
+              bandCtx.clearRect(0, 0, width, currentBandH);
+            }
+            bandCtx.save();
+            bandCtx.translate(0, -(offsetYPx + bandY));
+            renderItemsToExportCanvas(
+              bandCtx,
+              canvasItems,
+              assetsMap,
+              dpi,
+              exportCutLines,
+              prebuiltCaches
+            );
+            bandCtx.restore();
+            return bandCtx.getImageData(0, 0, width, currentBandH).data;
+          }
+        });
+      }
+
       const output = document.createElement('canvas');
       output.width = width;
       output.height = height;
       const context = output.getContext('2d');
       if (!context) throw new Error('No se pudo inicializar el lienzo de exportación.');
       context.clearRect(0, 0, width, height);
-
-      renderItemsToExportCanvas(context, canvasItems, assetsMap, dpi, exportCutLines);
+      context.save();
+      context.translate(0, -offsetYPx);
+      renderItemsToExportCanvas(context, canvasItems, assetsMap, dpi, exportCutLines, prebuiltCaches);
+      context.restore();
 
       const blob = await new Promise((resolve, reject) => {
         output.toBlob(
@@ -1279,7 +1362,22 @@ export default function GangSheet({
           'image/png'
         );
       });
-      const physicalPng = await addPngPhysicalResolutionToBlob(blob, dpi);
+      if (typeof onProgress === 'function') onProgress(1);
+      return addPngPhysicalResolutionToBlob(blob, dpi);
+    },
+    [sheetWidthCm, dpi, canvasItems, assetsMap, exportCutLines]
+  );
+
+  // Exportar la plancha final PNG a tamaño exacto (Ancho comercial 58-60 cm × Largo ocupado por los elementos)
+  const exportGangSheetPng = async () => {
+    if (!canvasItems.length || usedHeightCm <= 0) return;
+    setBusy(true);
+    setExportProgress(0);
+    setError('');
+    try {
+      const physicalPng = await renderSegmentToPhysicalPngBlob(0, usedHeightCm, (p) =>
+        setExportProgress(p)
+      );
       const url = URL.createObjectURL(physicalPng);
       const link = document.createElement('a');
       link.href = url;
@@ -1293,15 +1391,154 @@ export default function GangSheet({
       setError(`No se pudo exportar la plancha: ${exportErr.message}`);
     } finally {
       setBusy(false);
+      setExportProgress(null);
     }
   };
 
-  // Cálculos de memoria de exportación
+  // Exportar rollos largos (>100 cm) divididos automáticamente en tramos de 1 metro (100 cm) a 300 DPI
+  const exportSplitMeterSegments = async () => {
+    if (!canvasItems.length || usedHeightCm <= 0) return;
+    const segments = calculateMeterSegments(usedHeightCm, 100);
+    setBusy(true);
+    setExportProgress(0);
+    setError('');
+    try {
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const blob = await renderSegmentToPhysicalPngBlob(seg.startCm, seg.endCm, (p) => {
+          setExportProgress((i + p) / segments.length);
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `plancha_DTF_tramo_${seg.index}_de_${segments.length}_${sheetWidthCm}x${seg.heightCm.toFixed(1)}cm_${dpi}DPI.png`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      }
+      showToast(
+        `Exportados ${segments.length} tramos de 1 metro (${sheetWidthCm} cm ancho @ ${dpi} DPI).`
+      );
+    } catch (err) {
+      setError(`Error al exportar por tramos de 1 metro: ${err.message}`);
+    } finally {
+      setBusy(false);
+      setExportProgress(null);
+    }
+  };
+
+  // Cálculos de memoria de exportación (Soportando hasta 220 MPx / ~2.5 metros a 300 DPI por franjas)
   const estimatedPxW = Math.round((sheetWidthCm / 2.54) * dpi);
   const estimatedPxH = Math.round((usedHeightCm / 2.54) * dpi);
   const estimatedMegapixels = (estimatedPxW * estimatedPxH) / 1_000_000;
   const exceedsMemoryLimit =
-    usedHeightCm > 0 && (estimatedMegapixels > 40 || estimatedPxW > 16000 || estimatedPxH > 16000);
+    usedHeightCm > 0 &&
+    (estimatedPxW * estimatedPxH > MAX_EXPORT_PIXELS ||
+      estimatedPxW > MAX_CANVAS_DIMENSION ||
+      estimatedPxH > MAX_CANVAS_DIMENSION);
+
+  // Cotización comercial en vivo por metro lineal DTF con descuentos por volumen (+3m, +5m, +10m)
+  const pricingQuote = useMemo(
+    () =>
+      calculateDtfPricingQuote({
+        sheetWidthCm,
+        usedHeightCm,
+        basePricePerMeter,
+        billingMode,
+        taxRatePercent,
+        urgentProduction,
+        currency: 'EUR'
+      }),
+    [sheetWidthCm, usedHeightCm, basePricePerMeter, billingMode, taxRatePercent, urgentProduction]
+  );
+
+  // Enviar pedido a servidor / Webhook API o descargar paquete de orden de taller
+  const handleSendOrderToWebhook = async () => {
+    if (!canvasItems.length || usedHeightCm <= 0) return;
+    setIsSubmittingOrder(true);
+    setError('');
+    try {
+      const pngBlob = await renderSegmentToPhysicalPngBlob(0, usedHeightCm, (p) =>
+        setExportProgress(p)
+      );
+      const orderPayload = buildDtfOrderPayload({
+        customer: { name: customerName, email: customerEmail, phone: customerPhone, notes: orderNotes },
+        sheetWidthCm,
+        usedHeightCm,
+        dpi,
+        canvasItems,
+        quote: pricingQuote
+      });
+      await submitOrderToWebhook({ webhookUrl, orderPayload, pngBlob });
+      showToast(`Pedido ${orderPayload.orderId} enviado correctamente al servidor con PNG a ${dpi} DPI.`);
+      setShowOrderModal(false);
+    } catch (err) {
+      setError(`Error al enviar el pedido al Webhook: ${err.message}`);
+    } finally {
+      setIsSubmittingOrder(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleDownloadOrderBundle = async () => {
+    if (!canvasItems.length || usedHeightCm <= 0) return;
+    setIsSubmittingOrder(true);
+    setError('');
+    try {
+      const pngBlob = await renderSegmentToPhysicalPngBlob(0, usedHeightCm, (p) =>
+        setExportProgress(p)
+      );
+      const orderPayload = buildDtfOrderPayload({
+        customer: { name: customerName, email: customerEmail, phone: customerPhone, notes: orderNotes },
+        sheetWidthCm,
+        usedHeightCm,
+        dpi,
+        canvasItems,
+        quote: pricingQuote
+      });
+
+      // 1. Descargar PNG de producción a 300 DPI
+      const pngUrl = URL.createObjectURL(pngBlob);
+      const pngLink = document.createElement('a');
+      pngLink.href = pngUrl;
+      pngLink.download = `${orderPayload.orderId}_plancha_${sheetWidthCm}x${usedHeightCm.toFixed(1)}cm_${dpi}DPI.png`;
+      pngLink.click();
+      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
+
+      // 2. Descargar Ficha Técnica JSON del Pedido
+      const jsonBlob = new Blob([JSON.stringify(orderPayload, null, 2)], {
+        type: 'application/json;charset=utf-8'
+      });
+      const jsonUrl = URL.createObjectURL(jsonBlob);
+      const jsonLink = document.createElement('a');
+      jsonLink.href = jsonUrl;
+      jsonLink.download = `${orderPayload.orderId}_orden_produccion.json`;
+      jsonLink.click();
+      window.setTimeout(() => URL.revokeObjectURL(jsonUrl), 1500);
+
+      showToast(`Paquete de Pedido ${orderPayload.orderId} descargado (JSON + PNG ${dpi} DPI).`);
+      setShowOrderModal(false);
+    } catch (err) {
+      setError(`No se pudo generar el paquete de pedido: ${err.message}`);
+    } finally {
+      setIsSubmittingOrder(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleDispatchWhatsAppOrder = async () => {
+    if (!canvasItems.length || usedHeightCm <= 0) return;
+    const orderPayload = buildDtfOrderPayload({
+      customer: { name: customerName, email: customerEmail, phone: customerPhone, notes: orderNotes },
+      sheetWidthCm,
+      usedHeightCm,
+      dpi,
+      canvasItems,
+      quote: pricingQuote
+    });
+    const waUrl = buildWhatsAppOrderUrl(orderPayload, whatsappShopPhone);
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    showToast(`Resumen de pedido ${orderPayload.orderId} abierto en WhatsApp.`);
+  };
 
   // Reglas graduadas en cm (Horizontal: 0..sheetWidthCm, Vertical: 0..visibleArtboardHeightCm)
   const horizontalTicks = useMemo(() => {
@@ -1592,13 +1829,13 @@ export default function GangSheet({
           </button>
         </div>
 
-        {/* Bloque Derecho: Auto-Agrupar (Auto Nest) + Exportar Plancha DTF */}
-        <div className="flex items-center gap-2">
+        {/* Bloque Derecho: Auto-Agrupar (Auto Nest) + Exportar Plancha DTF + Tramos 1m + Pasarela Pedido */}
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             disabled={!canvasItems.length}
             onClick={handleAutoNestAll}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
+            className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
             title="Compacta automáticamente todas las imágenes para gastar el mínimo de metros posibles"
           >
             <Wand2 className="w-3.5 h-3.5" />
@@ -1619,20 +1856,46 @@ export default function GangSheet({
             ))}
           </select>
 
+          {usedHeightCm > 100 && (
+            <button
+              type="button"
+              disabled={!canvasItems.length || busy}
+              onClick={exportSplitMeterSegments}
+              className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-700 disabled:opacity-40 text-amber-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+              title="Divide automáticamente rollos largos en archivos PNG independientes de 1 metro (100 cm) a 300 DPI"
+            >
+              <SplitSquareVertical className="w-3.5 h-3.5" />
+              <span>Tramos 1m ({Math.ceil(usedHeightCm / 100)})</span>
+            </button>
+          )}
+
           <button
             type="button"
             disabled={!canvasItems.length || busy || exceedsMemoryLimit}
             onClick={exportGangSheetPng}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-500 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/15 transition cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-500 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/15 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>
               {busy
-                ? 'Generando PNG...'
+                ? exportProgress !== null
+                  ? `Exportando ${Math.round(exportProgress * 100)}%...`
+                  : 'Generando PNG...'
                 : exceedsMemoryLimit
-                ? `Bajar a ${dpi > 200 ? '200' : '150'} DPI`
+                ? `Dividir en Tramos 1m o bajar DPI`
                 : `Descargar Plancha (${sheetWidthCm}×${usedHeightCm.toFixed(0)}cm)`}
             </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!canvasItems.length}
+            onClick={() => setShowOrderModal(true)}
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-extrabold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/15 transition cursor-pointer"
+            title="Abrir calculadora comercial por metro lineal y pasarela de pedido / carrito DTF"
+          >
+            <ShoppingCart className="w-3.5 h-3.5" />
+            <span>Pedir ({pricingQuote.total.toFixed(2)} €)</span>
           </button>
         </div>
       </div>
@@ -1941,6 +2204,17 @@ export default function GangSheet({
                   {utilizationStats.utilizationPercent.toFixed(1)}%
                 </span>
               </div>
+              <div className="flex items-center justify-between text-[11px] text-stone-300 pt-1 border-t border-stone-800/80">
+                <span>Importe estimado ({pricingQuote.billableMeters.toFixed(2)} m):</span>
+                <span className="font-mono font-bold text-amber-300">
+                  {pricingQuote.total.toFixed(2)} € (IVA incl.)
+                </span>
+              </div>
+              {pricingQuote.discountPercent > 0 && (
+                <div className="text-[10px] text-emerald-400 font-semibold">
+                  ✓ {pricingQuote.tierLabel} aplicado
+                </div>
+              )}
 
               {(overlappingIds.size > 0 || offboardIds.size > 0) && (
                 <div className="mt-1.5 rounded-lg border border-amber-500/50 bg-amber-950/40 p-2 text-[11px] text-amber-200 flex items-start gap-1.5">
@@ -2500,6 +2774,199 @@ export default function GangSheet({
               >
                 <Check className="w-4 h-4" />
                 <span>Generar y Compactar Plancha</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          MODAL "PASARELA COMERCIAL DE PEDIDO Y PRESUPUESTO DTF" (LIMIT D)
+      ==================================================================== */}
+      {showOrderModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-stone-700 bg-stone-900 p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-amber-400" />
+                  Pasarela de Pedido DTF y Cálculo por Metro Lineal
+                </h3>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Rollo comercial de {sheetWidthCm} cm × {usedHeightCm.toFixed(1)} cm ({pricingQuote.exactMeters.toFixed(2)} m reales · {canvasItems.length} piezas a {dpi} DPI)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOrderModal(false)}
+                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-xs text-stone-300"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            {/* Configuración de Tarifa del Taller y Modo de Facturación */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-stone-950 border border-stone-800 rounded-xl p-3.5 text-xs">
+              <label className="text-stone-300">
+                <span className="block text-[11px] text-stone-400 mb-1">Precio base (€/metro lineal)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  step="0.5"
+                  value={basePricePerMeter}
+                  onChange={(e) => setBasePricePerMeter(Math.max(1, Number(e.target.value) || 12.5))}
+                  className="w-full rounded-lg bg-stone-900 border border-stone-700 px-2.5 py-1.5 font-mono text-white"
+                />
+              </label>
+
+              <label className="text-stone-300">
+                <span className="block text-[11px] text-stone-400 mb-1">Modo de facturación</span>
+                <select
+                  value={billingMode}
+                  onChange={(e) => setBillingMode(e.target.value)}
+                  className="w-full rounded-lg bg-stone-900 border border-stone-700 px-2.5 py-1.5 text-white"
+                >
+                  <option value="exact">Exacto por cm (mín. 0.25m)</option>
+                  <option value="half-meter">Tramos de 0.50 m</option>
+                  <option value="full-meter">Metros completos (1.00 m)</option>
+                </select>
+              </label>
+
+              <label className="text-stone-300">
+                <span className="block text-[11px] text-stone-400 mb-1">IVA / Impuesto (%)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  step="1"
+                  value={taxRatePercent}
+                  onChange={(e) => setTaxRatePercent(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full rounded-lg bg-stone-900 border border-stone-700 px-2.5 py-1.5 font-mono text-white"
+                />
+              </label>
+
+              <label className="md:col-span-3 flex items-center justify-between pt-1 cursor-pointer text-stone-200">
+                <span>Producción Exprés 24h (+20% prioridad en cola de impresión DTF)</span>
+                <input
+                  type="checkbox"
+                  checked={urgentProduction}
+                  onChange={(e) => setUrgentProduction(e.target.checked)}
+                  className="w-4 h-4 accent-amber-400 rounded"
+                />
+              </label>
+            </div>
+
+            {/* Desglose Económico Transparente (Con tramos de descuento automático +3m, +5m, +10m) */}
+            <div className="bg-stone-950 border border-stone-800 rounded-xl p-3.5 space-y-1.5 text-xs">
+              <div className="flex justify-between text-stone-300">
+                <span>Metros facturables ({pricingQuote.tierLabel}):</span>
+                <span className="font-mono font-bold text-white">
+                  {pricingQuote.billableMeters.toFixed(2)} m × {pricingQuote.unitPricePerMeter.toFixed(2)} €/m
+                </span>
+              </div>
+              {pricingQuote.discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-400">
+                  <span>Ahorro por volumen ({pricingQuote.discountPercent}% dto.):</span>
+                  <span className="font-mono">-{pricingQuote.discountAmount.toFixed(2)} €</span>
+                </div>
+              )}
+              {pricingQuote.urgentFee > 0 && (
+                <div className="flex justify-between text-amber-300">
+                  <span>Recargo Producción Exprés 24h:</span>
+                  <span className="font-mono">+{pricingQuote.urgentFee.toFixed(2)} €</span>
+                </div>
+              )}
+              <div className="flex justify-between text-stone-400">
+                <span>Base imponible:</span>
+                <span className="font-mono">{pricingQuote.netTotal.toFixed(2)} €</span>
+              </div>
+              <div className="flex justify-between text-stone-400">
+                <span>IVA ({pricingQuote.taxRatePercent}%):</span>
+                <span className="font-mono">{pricingQuote.taxAmount.toFixed(2)} €</span>
+              </div>
+              <div className="flex justify-between text-sm font-extrabold text-amber-300 pt-1.5 border-t border-stone-800">
+                <span>TOTAL PEDIDO DTF:</span>
+                <span className="font-mono">{pricingQuote.total.toFixed(2)} €</span>
+              </div>
+            </div>
+
+            {/* Datos del Cliente y Conexión Webhook / WhatsApp */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+              <input
+                type="text"
+                placeholder="Nombre del cliente o taller"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500"
+              />
+              <input
+                type="email"
+                placeholder="Email de confirmación"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                className="rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500"
+              />
+              <input
+                type="tel"
+                placeholder="Teléfono del cliente"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className="rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500"
+              />
+              <input
+                type="tel"
+                placeholder="WhatsApp receptor del taller (ej. 34600000000)"
+                value={whatsappShopPhone}
+                onChange={(e) => setWhatsappShopPhone(e.target.value)}
+                className="rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500"
+              />
+              <input
+                type="url"
+                placeholder="URL Webhook API / Shopify / Backend (opcional para envío directo del PNG)"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                className="md:col-span-2 rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500 font-mono"
+              />
+              <textarea
+                rows={2}
+                placeholder="Notas de producción (tipo de poliamida, perfil de color, entrega...)"
+                value={orderNotes}
+                onChange={(e) => setOrderNotes(e.target.value)}
+                className="md:col-span-2 rounded-lg bg-stone-950 border border-stone-800 px-3 py-2 text-white placeholder:text-stone-500"
+              />
+            </div>
+
+            {/* Acciones de Envío / Checkout */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-stone-800">
+              <button
+                type="button"
+                disabled={isSubmittingOrder}
+                onClick={handleDownloadOrderBundle}
+                className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Descargar Orden + PNG</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmittingOrder}
+                onClick={handleDispatchWhatsAppOrder}
+                className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 border border-stone-700 text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>Enviar por WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmittingOrder || !webhookUrl.trim()}
+                onClick={handleSendOrderToWebhook}
+                className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span>{isSubmittingOrder ? 'Enviando...' : 'Enviar a Webhook API'}</span>
               </button>
             </div>
           </div>
