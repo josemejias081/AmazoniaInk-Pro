@@ -1,19 +1,22 @@
 /**
- * Motor de Vectorización Real por Contornos y Curvas de Bézier Cúbicas (Marching Edges + Douglas-Peucker + Catmull-Rom Splines).
- * Convierte mapas de etiquetas de capas de color en trazados vectoriales limpios con nodos y curvas Bézier (M, L, C, Z)
- * compatibles con Adobe Illustrator, CorelDRAW, Inkscape y plotters de corte de vinilo.
+ * Motor de Vectorización Industrial v2:
+ * - Cuantización Perceptual CIE L*a*b* acelerada por Histograma 3D + Semillas K-Means++ (detecta detalles pequeños de alto contraste)
+ * - Extracción Topológica de Contornos con Política de Giro a la Derecha (Right-Hand Turn Policy) en vértices de grado 4 (sin auto-intersecciones)
+ * - Des-escalonado Laplaciano sensible a esquinas + Simplificación Ramer-Douglas-Peucker + Splines de Bézier Cúbicas (M, L, C, Z)
+ * - Soporte de Solape / Trapping Serigráfico para eliminar costuras entre colores adyacentes.
  */
+import { hexToRgb, rgbToHex, rgbToLab } from './backgroundRemoval.js';
 
 // Extrae todos los contornos cerrados (exteriores e interiores/agujeros) de una capa binaria mediante aristas dirigidas
 export const extractLayerContours = (labelMap, width, height, targetLayerIdx) => {
   // Representamos cada arista dirigida entre vértices de la rejilla (0..width, 0..height)
   // Un píxel (x, y) activo genera hasta 4 aristas dirigidas en sentido horario:
-  // Arriba: (x,y) -> (x+1,y) si (x, y-1) no pertenece a la capa
-  // Derecha: (x+1,y) -> (x+1,y+1) si (x+1, y) no pertenece a la capa
-  // Abajo: (x+1,y+1) -> (x,y+1) si (x, y+1) no pertenece a la capa
-  // Izquierda: (x,y+1) -> (x,y) si (x-1, y) no pertenece a la capa
+  // Arriba:    (x,y)     -> (x+1,y)   dir = (+1,  0)
+  // Derecha:   (x+1,y)   -> (x+1,y+1) dir = ( 0, +1)
+  // Abajo:     (x+1,y+1) -> (x,y+1)   dir = (-1,  0)
+  // Izquierda: (x,y+1)   -> (x,y)     dir = ( 0, -1)
   const gridW = width + 1;
-  const outgoing = new Map(); // vertexKey -> array de { toX, toY, used }
+  const outgoing = new Map(); // vertexKey -> array de { x1, y1, x2, y2, dx, dy, used }
 
   const addEdge = (x1, y1, x2, y2) => {
     const key = y1 * gridW + x1;
@@ -22,7 +25,7 @@ export const extractLayerContours = (labelMap, width, height, targetLayerIdx) =>
       list = [];
       outgoing.set(key, list);
     }
-    list.push({ x1, y1, x2, y2, used: false });
+    list.push({ x1, y1, x2, y2, dx: x2 - x1, dy: y2 - y1, used: false });
   };
 
   const isTarget = (x, y) => {
@@ -41,6 +44,33 @@ export const extractLayerContours = (labelMap, width, height, targetLayerIdx) =>
     }
   }
 
+  // En vértices de grado 4 (dos píxeles que se tocan en diagonal), elegir siempre el giro a la derecha
+  // respecto a la dirección entrante (inDx, inDy) para mantener cada isla como un polígono simple sin cruces en "8".
+  const pickNextEdgeRightTurn = (nextList, inDx, inDy) => {
+    let bestEdge = null;
+    let bestScore = -Infinity;
+    // Giro a la derecha en coordenadas de pantalla (Y hacia abajo): right = (-inDy, inDx)
+    const rightDx = -inDy;
+    const rightDy = inDx;
+    for (let i = 0; i < nextList.length; i++) {
+      const candidate = nextList[i];
+      if (candidate.used) continue;
+      let score = 0;
+      if (candidate.dx === rightDx && candidate.dy === rightDy) {
+        score = 3; // Prioridad 1: Giro a la derecha (abraza la esquina del píxel)
+      } else if (candidate.dx === inDx && candidate.dy === inDy) {
+        score = 2; // Prioridad 2: Seguir recto
+      } else if (candidate.dx === -rightDx && candidate.dy === -rightDy) {
+        score = 1; // Prioridad 3: Giro a la izquierda
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestEdge = candidate;
+      }
+    }
+    return bestEdge;
+  };
+
   const loops = [];
   for (const [, edgeList] of outgoing) {
     for (const startEdge of edgeList) {
@@ -49,20 +79,24 @@ export const extractLayerContours = (labelMap, width, height, targetLayerIdx) =>
       const points = [{ x: startEdge.x1, y: startEdge.y1 }];
       let currX = startEdge.x2;
       let currY = startEdge.y2;
+      let inDx = startEdge.dx;
+      let inDy = startEdge.dy;
       const startX = startEdge.x1;
       const startY = startEdge.y1;
 
       let safety = 0;
-      const maxSteps = (width + height) * 8 + 1000;
+      const maxSteps = (width + height) * 12 + 2000;
       while ((currX !== startX || currY !== startY) && safety++ < maxSteps) {
         points.push({ x: currX, y: currY });
         const nextList = outgoing.get(currY * gridW + currX);
         if (!nextList) break;
-        const nextEdge = nextList.find((e) => !e.used);
+        const nextEdge = pickNextEdgeRightTurn(nextList, inDx, inDy);
         if (!nextEdge) break;
         nextEdge.used = true;
         currX = nextEdge.x2;
         currY = nextEdge.y2;
+        inDx = nextEdge.dx;
+        inDy = nextEdge.dy;
       }
 
       if (points.length >= 4) {
@@ -162,26 +196,41 @@ const simplifyOpenPolylineRDP = (pts, epsilon) => {
   return [first, last];
 };
 
-// Simplifica un contorno cerrado dividiéndolo en dos arcos por sus puntos más lejanos
+// Simplifica un contorno cerrado de manera determinista (anclando el punto lexicográficamente menor en X,Y)
 export const simplifyClosedContour = (points, epsilon = 0.85) => {
   if (points.length <= 4) return points;
-  let farthestIdx = Math.floor(points.length / 2);
-  let maxDist = -1;
-  const p0 = points[0];
+
+  // Rotar el contorno para que siempre empiece en el vértice canónico (menor Y, luego menor X)
+  // garantizando que dos capas adyacentes compartan anclajes deterministas
+  let startIdx = 0;
   for (let i = 1; i < points.length; i++) {
-    const d = Math.hypot(points[i].x - p0.x, points[i].y - p0.y);
+    if (
+      points[i].y < points[startIdx].y ||
+      (points[i].y === points[startIdx].y && points[i].x < points[startIdx].x)
+    ) {
+      startIdx = i;
+    }
+  }
+  const ordered =
+    startIdx === 0 ? points : [...points.slice(startIdx), ...points.slice(0, startIdx)];
+
+  let farthestIdx = Math.floor(ordered.length / 2);
+  let maxDist = -1;
+  const p0 = ordered[0];
+  for (let i = 1; i < ordered.length; i++) {
+    const d = Math.hypot(ordered[i].x - p0.x, ordered[i].y - p0.y);
     if (d > maxDist) {
       maxDist = d;
       farthestIdx = i;
     }
   }
 
-  const arc1 = points.slice(0, farthestIdx + 1);
-  const arc2 = [...points.slice(farthestIdx), points[0]];
+  const arc1 = ordered.slice(0, farthestIdx + 1);
+  const arc2 = [...ordered.slice(farthestIdx), ordered[0]];
   const simp1 = simplifyOpenPolylineRDP(arc1, epsilon);
   const simp2 = simplifyOpenPolylineRDP(arc2, epsilon);
   const combined = [...simp1.slice(0, -1), ...simp2.slice(0, -1)];
-  return combined.length >= 3 ? combined : points;
+  return combined.length >= 3 ? combined : ordered;
 };
 
 const fmt = (num) => Number(num.toFixed(2));
@@ -248,7 +297,7 @@ export const contourToBezierSubpath = (points, tension = 0.22) => {
       const cp1x = isCorner[i] ? p1.x + (p2.x - p1.x) * 0.25 : p1.x + (p2.x - p0.x) * tension;
       const cp1y = isCorner[i] ? p1.y + (p2.y - p1.y) * 0.25 : p1.y + (p2.y - p0.y) * tension;
       const cp2x = isCorner[(i + 1) % n] ? p2.x - (p2.x - p1.x) * 0.25 : p2.x - (p3.x - p1.x) * tension;
-      const cp2y = isCorner[(i + 1) % n] ? p2.y - (p2.y - p1.y) * 0.25 : p2.y - (p3.x - p1.y) * tension;
+      const cp2y = isCorner[(i + 1) % n] ? p2.y - (p2.y - p1.y) * 0.25 : p2.y - (p3.y - p1.y) * tension;
       d += `C${fmt(cp1x)},${fmt(cp1y)} ${fmt(cp2x)},${fmt(cp2y)} ${fmt(p2.x)},${fmt(p2.y)}`;
     }
   }
@@ -266,7 +315,7 @@ export const traceLayerToBezierSvgPath = (labelMap, width, height, layerIdx, smo
   if (!rawLoops.length) return '';
 
   const smoothIterations = smoothness <= 0 ? 0 : smoothness === 1 ? 2 : 3;
-  const rdpEpsilon = smoothness <= 0 ? 0.45 : smoothness === 1 ? 0.9 : 1.35;
+  const rdpEpsilon = smoothness <= 0 ? 0.45 : smoothness === 1 ? 0.85 : 1.25;
 
   const subpaths = [];
   for (const loop of rawLoops) {
@@ -289,8 +338,258 @@ export const traceLayerToBezierSvgPath = (labelMap, width, height, layerIdx, smo
 };
 
 /**
+ * Cuantiza una imagen RGBA en `numColors` capas de tintas planas usando un Histograma 3D +
+ * inicialización determinista K-Means++ en espacio perceptual CIE L*a*b* + filtrado morfológico.
+ */
+export const quantizeImageToLayers = (
+  smallData,
+  vw,
+  vh,
+  {
+    numColors = 5,
+    smoothness = 1,
+    ignoreTransparent = true,
+    customPalette = null
+  } = {}
+) => {
+  const k = Math.max(2, Math.min(16, Number(numColors) || 5));
+  const totalPixels = vw * vh;
+
+  // 1. Construir histograma 3D compacto (32x32x32 = 32768 celdas) de píxeles opacos
+  const BIN_COUNT = 32768;
+  const binCounts = new Uint32Array(BIN_COUNT);
+  const binSumR = new Float64Array(BIN_COUNT);
+  const binSumG = new Float64Array(BIN_COUNT);
+  const binSumB = new Float64Array(BIN_COUNT);
+
+  for (let p = 0; p < totalPixels; p++) {
+    const idx = p * 4;
+    if (ignoreTransparent && smallData[idx + 3] <= 128) continue;
+    const r = smallData[idx];
+    const g = smallData[idx + 1];
+    const b = smallData[idx + 2];
+    const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    binCounts[bin]++;
+    binSumR[bin] += r;
+    binSumG[bin] += g;
+    binSumB[bin] += b;
+  }
+
+  const activeBins = [];
+  for (let bin = 0; bin < BIN_COUNT; bin++) {
+    const count = binCounts[bin];
+    if (count === 0) continue;
+    const r = Math.round(binSumR[bin] / count);
+    const g = Math.round(binSumG[bin] / count);
+    const b = Math.round(binSumB[bin] / count);
+    const lab = rgbToLab(r, g, b);
+    activeBins.push({ r, g, b, l: lab.L, a: lab.a, bLab: lab.b, count });
+  }
+
+  if (activeBins.length === 0) {
+    activeBins.push({ r: 0, g: 0, b: 0, l: 0, a: 0, bLab: 0, count: 1 });
+  }
+
+  // 2. Inicializar centroides en espacio perceptual CIE L*a*b* (o respetar paleta personalizada si coincide en longitud)
+  let centroids = [];
+  const hasMatchingCustomPalette = Array.isArray(customPalette) && customPalette.length === k;
+
+  if (hasMatchingCustomPalette) {
+    centroids = customPalette.map((layer) => {
+      const rgb = hexToRgb(layer.originalHex || layer.hex);
+      const lab = rgbToLab(rgb.r, rgb.g, rgb.b);
+      return { r: rgb.r, g: rgb.g, b: rgb.b, l: lab.L, a: lab.a, bLab: lab.b };
+    });
+  } else {
+    // Semilla 0: el color con mayor presencia en el diseño
+    let firstSeed = activeBins[0];
+    for (let i = 1; i < activeBins.length; i++) {
+      if (activeBins[i].count > firstSeed.count) {
+        firstSeed = activeBins[i];
+      }
+    }
+    centroids.push({ ...firstSeed });
+
+    // Semillas 1..k-1: K-Means++ determinista ponderado por distancia perceptual CIE L*a*b* y raíz cúbica de frecuencia
+    // (permite capturar detalles pequeños de alto contraste como acentos rojos o dorados sin caer en ruido de 1 píxel)
+    while (centroids.length < k) {
+      let bestBin = activeBins[0];
+      let bestScore = -1;
+
+      for (let i = 0; i < activeBins.length; i++) {
+        const candidate = activeBins[i];
+        let minDistSq = Infinity;
+        for (let c = 0; c < centroids.length; c++) {
+          const dl = candidate.l - centroids[c].l;
+          const da = candidate.a - centroids[c].a;
+          const db = candidate.bLab - centroids[c].bLab;
+          const dSq = dl * dl + da * da + db * db;
+          if (dSq < minDistSq) minDistSq = dSq;
+        }
+        const weight = Math.pow(candidate.count, 0.35);
+        const score = minDistSq * weight;
+        if (score > bestScore) {
+          bestScore = score;
+          bestBin = candidate;
+        }
+      }
+      centroids.push({ ...bestBin });
+    }
+
+    // 8 iteraciones de refinamiento K-Means sobre el histograma compacto en CIE L*a*b*
+    for (let iter = 0; iter < 8; iter++) {
+      const sums = Array.from({ length: k }, () => ({
+        r: 0,
+        g: 0,
+        b: 0,
+        l: 0,
+        a: 0,
+        bLab: 0,
+        weight: 0
+      }));
+
+      for (let i = 0; i < activeBins.length; i++) {
+        const bin = activeBins[i];
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let c = 0; c < k; c++) {
+          const dl = bin.l - centroids[c].l;
+          const da = bin.a - centroids[c].a;
+          const db = bin.bLab - centroids[c].bLab;
+          const d = dl * dl + da * da + db * db;
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = c;
+          }
+        }
+        const w = bin.count;
+        sums[bestIdx].r += bin.r * w;
+        sums[bestIdx].g += bin.g * w;
+        sums[bestIdx].b += bin.b * w;
+        sums[bestIdx].l += bin.l * w;
+        sums[bestIdx].a += bin.a * w;
+        sums[bestIdx].bLab += bin.bLab * w;
+        sums[bestIdx].weight += w;
+      }
+
+      for (let c = 0; c < k; c++) {
+        if (sums[c].weight > 0) {
+          const w = sums[c].weight;
+          centroids[c] = {
+            r: Math.round(sums[c].r / w),
+            g: Math.round(sums[c].g / w),
+            b: Math.round(sums[c].b / w),
+            l: sums[c].l / w,
+            a: sums[c].a / w,
+            bLab: sums[c].bLab / w
+          };
+        }
+      }
+    }
+  }
+
+  // 3. Construir tabla rápida de asignación bin -> cluster (LUT de 32768 entradas)
+  const binToCluster = new Int16Array(BIN_COUNT).fill(-1);
+  for (let bin = 0; bin < BIN_COUNT; bin++) {
+    if (binCounts[bin] === 0) continue;
+    const count = binCounts[bin];
+    const r = Math.round(binSumR[bin] / count);
+    const g = Math.round(binSumG[bin] / count);
+    const b = Math.round(binSumB[bin] / count);
+    const lab = rgbToLab(r, g, b);
+
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let c = 0; c < k; c++) {
+      const dl = lab.L - centroids[c].l;
+      const da = lab.a - centroids[c].a;
+      const db = lab.b - centroids[c].bLab;
+      const d = dl * dl + da * da + db * db;
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = c;
+      }
+    }
+    binToCluster[bin] = bestIdx;
+  }
+
+  // 4. Asignar cada píxel a su capa mediante la LUT O(1)
+  let labelMap = new Int16Array(totalPixels).fill(-1);
+  for (let p = 0; p < totalPixels; p++) {
+    const idx = p * 4;
+    if (ignoreTransparent && smallData[idx + 3] <= 128) continue;
+    const r = smallData[idx];
+    const g = smallData[idx + 1];
+    const b = smallData[idx + 2];
+    const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    labelMap[p] = binToCluster[bin];
+  }
+
+  // 5. Filtrado morfológico de voto mayoritario (Majority Vote) que preserva líneas finas
+  const voteCounts = new Int32Array(k + 1);
+  for (let pass = 0; pass < smoothness; pass++) {
+    const smoothed = new Int16Array(labelMap);
+    for (let y = 1; y < vh - 1; y++) {
+      const rowOffset = y * vw;
+      for (let x = 1; x < vw - 1; x++) {
+        const p = rowOffset + x;
+        const centerLabel = labelMap[p];
+        voteCounts.fill(0);
+        let maxCount = 0;
+        let winner = centerLabel;
+
+        for (let dy = -1; dy <= 1; dy++) {
+          const nRow = (y + dy) * vw;
+          for (let dx = -1; dx <= 1; dx++) {
+            const lbl = labelMap[nRow + (x + dx)];
+            const slot = lbl + 1; // -1 -> 0, 0..k-1 -> 1..k
+            const nextCount = ++voteCounts[slot];
+            if (nextCount > maxCount) {
+              maxCount = nextCount;
+              winner = lbl;
+            }
+          }
+        }
+        // Solo reemplazar el píxel central si el ganador tiene mayoría clara (>= 5 de 9 vecinos)
+        if (maxCount >= 5) {
+          smoothed[p] = winner;
+        }
+      }
+    }
+    labelMap = smoothed;
+  }
+
+  // 6. Contabilizar cobertura y pre-trazar el path de Curvas Bézier de cada capa
+  const counts = new Array(k).fill(0);
+  let totalOpaque = 0;
+  for (let p = 0; p < totalPixels; p++) {
+    if (labelMap[p] >= 0) {
+      counts[labelMap[p]]++;
+      totalOpaque++;
+    }
+  }
+
+  const layers = centroids.map((c, idx) => {
+    const detectedHex = rgbToHex(c.r, c.g, c.b);
+    const customLayer = hasMatchingCustomPalette ? customPalette[idx] : null;
+    const pathData =
+      counts[idx] > 0 ? traceLayerToBezierSvgPath(labelMap, vw, vh, idx, smoothness) : '';
+    return {
+      hex: customLayer?.hex || detectedHex,
+      originalHex: customLayer?.originalHex || detectedHex,
+      visible: customLayer?.visible ?? true,
+      count: counts[idx],
+      percentage: totalOpaque > 0 ? Math.round((counts[idx] / totalOpaque) * 100) : 0,
+      pathData
+    };
+  });
+
+  return { labelMap, width: vw, height: vh, layers };
+};
+
+/**
  * Construye el documento SVG completo con curvas de Bézier reales (`fill-rule="evenodd"`)
- * o en modo RLE de píxel exacto si se solicita.
+ * o en modo RLE de píxel exacto si se solicita. Incluye soporte para Trapping Serigráfico (`trappingPx`).
  */
 export const buildBezierVectorSVG = (
   labelMap,
@@ -299,11 +598,12 @@ export const buildBezierVectorSVG = (
   layers,
   includeRegMarks = false,
   physicalDims = null,
-  options = { smoothness: 1, mode: 'bezier' }
+  options = { smoothness: 1, mode: 'bezier', trappingPx: 0 }
 ) => {
   const widthAttr = physicalDims ? `${physicalDims.width}${physicalDims.unit}` : `${w}`;
   const heightAttr = physicalDims ? `${physicalDims.height}${physicalDims.unit}` : `${h}`;
   const isBezier = (options?.mode ?? 'bezier') === 'bezier';
+  const trappingPx = Math.max(0, Number(options?.trappingPx) || 0);
   const shapeRendering = isBezier ? 'geometricPrecision' : 'crispEdges';
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${widthAttr}" height="${heightAttr}" shape-rendering="${shapeRendering}">\n`;
@@ -313,10 +613,15 @@ export const buildBezierVectorSVG = (
     const safeHex = /^#[0-9a-f]{6}$/i.test(layer.hex) ? layer.hex : '#000000';
 
     if (isBezier) {
-      const pathData = traceLayerToBezierSvgPath(labelMap, w, h, idx, options?.smoothness ?? 1);
+      const pathData =
+        layer.pathData || traceLayerToBezierSvgPath(labelMap, w, h, idx, options?.smoothness ?? 1);
       if (pathData.length > 0) {
+        const trapAttr =
+          trappingPx > 0
+            ? ` stroke="${safeHex}" stroke-width="${fmt(trappingPx)}" stroke-linejoin="round"`
+            : '';
         svg += `  <g id="capa-${idx + 1}-${safeHex.replace('#', '')}">\n`;
-        svg += `    <path fill="${safeHex}" fill-rule="evenodd" d="${pathData}" />\n`;
+        svg += `    <path fill="${safeHex}" fill-rule="evenodd"${trapAttr} d="${pathData}" />\n`;
         svg += `  </g>\n`;
       }
     } else {

@@ -18,7 +18,11 @@ import GangSheet, { makeGangEntry } from './GangSheet.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
 import { deleteProject, getProject, listProjects, saveProject } from './utils/projectStore.js';
 import { removeBackground, hexToRgb, rgbToHex } from './utils/backgroundRemoval.js';
-import { buildBezierVectorSVG } from './utils/bezierVectorizer.js';
+import {
+  buildBezierVectorSVG,
+  quantizeImageToLayers,
+  traceLayerToBezierSvgPath
+} from './utils/bezierVectorizer.js';
 
 const MAX_HISTORY_STEPS = 20;
 const MAX_WORKING_DIMENSION = 3600;
@@ -317,15 +321,18 @@ export default function App() {
   const [htGamma, setHtGamma] = useState(1);
 
   // --------------------------------------------------------------------------
-  // 3. ESTADO: VECTORIZAR Y SEPARACIÓN DE COLORES
+  // 3. ESTADO: VECTORIZAR Y SEPARACIÓN DE COLORES (K-MEANS++ CIE L*a*b* + BÉZIER v2)
   // --------------------------------------------------------------------------
   const [vecNumColors, setVecNumColors] = useState(5);
-  const [vecSmoothness, setVecSmoothness] = useState(1); // 0 = nítido, 1 = suave, 2 = ultra limpio
+  const [vecSmoothness, setVecSmoothness] = useState(1); // 0 = nítido, 1 = suave, 2 = limpio, 3 = ultra limpio
+  const [vecDetailLevel, setVecDetailLevel] = useState('high'); // 'standard' (420px) | 'high' (680px) | 'ultra' (960px)
+  const [vecTrappingPx, setVecTrappingPx] = useState(0.5); // Solape serigráfico entre tintas (0 a 2 px)
   const [vecIgnoreTransparent, setVecIgnoreTransparent] = useState(true);
-  const [vecLayers, setVecLayers] = useState([]); // [{ hex, originalHex, visible, count, percentage }]
+  const [vecLayers, setVecLayers] = useState([]); // [{ hex, originalHex, visible, count, percentage, pathData }]
   const [vecRegMarks, setVecRegMarks] = useState(false);
   const [vecPathMode, setVecPathMode] = useState('bezier'); // 'bezier' (Curvas Bézier suaves) | 'rle' (Píxel exacto)
   const vecDataRef = useRef(null); // Guarda { labelMap, width, height }
+  const vecCustomPaletteRef = useRef(null); // Preserva colores y visibilidad editados por el usuario
 
   // --------------------------------------------------------------------------
   // 4. ESTADO: ESCALAR, DPI Y ESPEJO (SUBLIMACIÓN / DTF)
@@ -412,6 +419,7 @@ export default function App() {
       setBgPreviewPending(true);
       setHtPreviewPending(true);
       setVecPreviewPending(true);
+      vecCustomPaletteRef.current = null;
       setPrintUnit('cm');
       setPrintWidthCm(25);
       setPrintHeightCm(25);
@@ -521,6 +529,7 @@ export default function App() {
       setBgPreviewPending(true);
       setHtPreviewPending(true);
       setVecPreviewPending(true);
+      vecCustomPaletteRef.current = null;
       setActiveTab('bg');
       setBgInteractionMode('picker');
       const ratio = height / width;
@@ -621,7 +630,8 @@ export default function App() {
           bgChoke, bgContiguous, bgMode, htMode, htMethod, htFrequency, htAngle, htShape,
           vecNumColors, htContrast, htThreshold, htInvert, htRemoveBlackEdges,
           htCropThreshold, htBlackPoint, htWhitePoint, htGamma, vecSmoothness,
-          vecIgnoreTransparent, vecRegMarks, vecPathMode, underbaseChoke, showUnderbasePreview,
+          vecDetailLevel, vecTrappingPx, vecIgnoreTransparent, vecRegMarks, vecPathMode,
+          underbaseChoke, showUnderbasePreview,
           bgInteractionMode, brushSize, bgPreviewMode, customShirtColor,
           bgPreviewPending, htPreviewPending, vecPreviewPending
         }
@@ -729,6 +739,8 @@ export default function App() {
       setHtGamma(settings.htGamma);
       setVecNumColors(settings.vecNumColors);
       setVecSmoothness(settings.vecSmoothness);
+      setVecDetailLevel(settings.vecDetailLevel || 'high');
+      setVecTrappingPx(Number.isFinite(settings.vecTrappingPx) ? settings.vecTrappingPx : 0.5);
       setVecIgnoreTransparent(settings.vecIgnoreTransparent);
       setVecRegMarks(settings.vecRegMarks);
       setVecPathMode(settings.vecPathMode || 'bezier');
@@ -1015,13 +1027,13 @@ export default function App() {
   ]);
 
   // ==========================================================================
-  // MOTOR 3: VECTORIZADOR Y SEPARACIÓN DE COLORES PLANOS (K-MEANS + SVG)
+  // MOTOR 3: VECTORIZADOR INDUSTRIAL v2 (K-MEANS++ CIE L*a*b* + CURVAS BÉZIER)
   // ==========================================================================
   const runVectorization = useCallback((baseData, customPalette = null) => {
     if (!baseData) return null;
 
-    // Reducimos a una rejilla de vectorización limpia (~360px) para obtener bordes definidos y SVG ligero
-    const maxVecDim = 360;
+    const maxVecDim =
+      vecDetailLevel === 'ultra' ? 960 : vecDetailLevel === 'high' ? 680 : 420;
     const scale = Math.min(1, maxVecDim / Math.max(baseData.width, baseData.height));
     const vw = Math.max(16, Math.round(baseData.width * scale));
     const vh = Math.max(16, Math.round(baseData.height * scale));
@@ -1038,140 +1050,58 @@ export default function App() {
     tCtx.drawImage(origCanvas, 0, 0, vw, vh);
 
     const smallData = tCtx.getImageData(0, 0, vw, vh).data;
-    const k = vecNumColors;
+    const effectivePalette = customPalette || vecCustomPaletteRef.current;
 
-    // Inicializar centroides de color con muestras distribuidas de píxeles opacos
-    let centroids = [];
-    if (customPalette && customPalette.length === k) {
-      centroids = customPalette.map(layer => {
-        const rgb = hexToRgb(layer.hex);
-        return [rgb.r, rgb.g, rgb.b];
-      });
-    } else {
-      const opaqueSamples = [];
-      for (let i = 0; i < smallData.length; i += 16) {
-        if (smallData[i + 3] > 128) {
-          opaqueSamples.push([smallData[i], smallData[i + 1], smallData[i + 2]]);
-        }
-      }
-      if (opaqueSamples.length === 0) opaqueSamples.push([0, 0, 0]);
-      for (let c = 0; c < k; c++) {
-        const pick = opaqueSamples[Math.floor((c / k) * opaqueSamples.length)];
-        centroids.push([...pick]);
-      }
-
-      // 6 iteraciones rápidas de K-Means para encontrar los colores dominantes exactos
-      for (let iter = 0; iter < 6; iter++) {
-        const sums = Array.from({ length: k }, () => [0, 0, 0, 0]);
-        for (let i = 0; i < smallData.length; i += 8) {
-          if (smallData[i + 3] <= 128) continue;
-          const r = smallData[i], g = smallData[i + 1], b = smallData[i + 2];
-          let bestIdx = 0;
-          let bestDist = Infinity;
-          for (let c = 0; c < k; c++) {
-            const dr = r - centroids[c][0];
-            const dg = g - centroids[c][1];
-            const db = b - centroids[c][2];
-            const d = dr * dr + dg * dg + db * db;
-            if (d < bestDist) {
-              bestDist = d;
-              bestIdx = c;
-            }
-          }
-          sums[bestIdx][0] += r;
-          sums[bestIdx][1] += g;
-          sums[bestIdx][2] += b;
-          sums[bestIdx][3] += 1;
-        }
-        for (let c = 0; c < k; c++) {
-          if (sums[c][3] > 0) {
-            centroids[c][0] = Math.round(sums[c][0] / sums[c][3]);
-            centroids[c][1] = Math.round(sums[c][1] / sums[c][3]);
-            centroids[c][2] = Math.round(sums[c][2] / sums[c][3]);
-          }
-        }
-      }
-    }
-
-    // Asignar cada píxel a su capa de color plano
-    let labelMap = new Int16Array(vw * vh).fill(-1);
-    for (let p = 0; p < vw * vh; p++) {
-      const idx = p * 4;
-      if (vecIgnoreTransparent && smallData[idx + 3] <= 128) {
-        labelMap[p] = -1;
-        continue;
-      }
-      const r = smallData[idx], g = smallData[idx + 1], b = smallData[idx + 2];
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let c = 0; c < k; c++) {
-        const dr = r - centroids[c][0];
-        const dg = g - centroids[c][1];
-        const db = b - centroids[c][2];
-        const d = dr * dr + dg * dg + db * db;
-        if (d < bestDist) {
-          bestDist = d;
-          bestIdx = c;
-        }
-      }
-      labelMap[p] = bestIdx;
-    }
-
-    // Filtro de suavizado de motas (Majority Vote Filter) para bordes limpios de serigrafía
-    for (let pass = 0; pass < vecSmoothness; pass++) {
-      const smoothed = new Int16Array(labelMap);
-      for (let y = 1; y < vh - 1; y++) {
-        for (let x = 1; x < vw - 1; x++) {
-          const p = y * vw + x;
-          const counts = {};
-          let maxCount = 0;
-          let winner = labelMap[p];
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const lbl = labelMap[(y + dy) * vw + (x + dx)];
-              counts[lbl] = (counts[lbl] || 0) + 1;
-              if (counts[lbl] > maxCount) {
-                maxCount = counts[lbl];
-                winner = lbl;
-              }
-            }
-          }
-          smoothed[p] = winner;
-        }
-      }
-      labelMap = smoothed;
-    }
-
-    // Contabilizar cobertura de cada tinta
-    const counts = new Array(k).fill(0);
-    let totalOpaque = 0;
-    for (let p = 0; p < vw * vh; p++) {
-      if (labelMap[p] >= 0) {
-        counts[labelMap[p]]++;
-        totalOpaque++;
-      }
-    }
-
-    const updatedLayers = centroids.map((c, idx) => ({
-      hex: customPalette?.[idx]?.hex || rgbToHex(c[0], c[1], c[2]),
-      visible: customPalette?.[idx]?.visible ?? true,
-      count: counts[idx],
-      percentage: totalOpaque > 0 ? Math.round((counts[idx] / totalOpaque) * 100) : 0
-    }));
+    const { labelMap, layers: updatedLayers } = quantizeImageToLayers(smallData, vw, vh, {
+      numColors: vecNumColors,
+      smoothness: vecSmoothness,
+      ignoreTransparent: vecIgnoreTransparent,
+      customPalette: effectivePalette
+    });
 
     vecDataRef.current = { labelMap, width: vw, height: vh };
     setVecLayers(updatedLayers);
-  }, [vecNumColors, vecSmoothness, vecIgnoreTransparent]);
+  }, [vecNumColors, vecSmoothness, vecIgnoreTransparent, vecDetailLevel]);
 
-  // Renderizar las capas vectorizadas de vuelta al tamaño de imagen actual
+  // Renderizar las capas vectorizadas al tamaño de imagen actual:
+  // - En modo 'bezier' renderiza las curvas de Bézier reales con Path2D + fill-rule="evenodd" + trapping
+  // - En modo 'rle' renderiza la matriz de píxeles exactos
   const renderVectorPreviewToImageData = useCallback((baseData, layers) => {
     if (!baseData || !vecDataRef.current) return baseData;
     const { labelMap, width: vw, height: vh } = vecDataRef.current;
     const w = baseData.width;
     const h = baseData.height;
+
+    if (vecPathMode === 'bezier' && typeof Path2D !== 'undefined') {
+      const vecCanvas = document.createElement('canvas');
+      vecCanvas.width = w;
+      vecCanvas.height = h;
+      const vCtx = vecCanvas.getContext('2d');
+      if (vCtx) {
+        vCtx.save();
+        vCtx.scale(w / Math.max(1, vw), h / Math.max(1, vh));
+        layers.forEach((layer, idx) => {
+          if (!layer.visible) return;
+          const pathStr =
+            layer.pathData || traceLayerToBezierSvgPath(labelMap, vw, vh, idx, vecSmoothness);
+          if (!pathStr) return;
+          const path2d = new Path2D(pathStr);
+          vCtx.fillStyle = layer.hex;
+          vCtx.fill(path2d, 'evenodd');
+          if (vecTrappingPx > 0) {
+            vCtx.strokeStyle = layer.hex;
+            vCtx.lineWidth = vecTrappingPx;
+            vCtx.lineJoin = 'round';
+            vCtx.stroke(path2d);
+          }
+        });
+        vCtx.restore();
+        return vCtx.getImageData(0, 0, w, h);
+      }
+    }
+
     const out = new ImageData(w, h);
     const dst = out.data;
-
     const rgbLayers = layers.map(l => ({ ...hexToRgb(l.hex), visible: l.visible }));
 
     for (let y = 0; y < h; y++) {
@@ -1189,7 +1119,7 @@ export default function App() {
       }
     }
     return out;
-  }, []);
+  }, [vecPathMode, vecSmoothness, vecTrappingPx]);
 
   // Obtiene la imagen base adecuada evitando reaplicar semitonos o vectorización sobre sí mismos
   const getToolSourceImage = useCallback((toolId) => {
@@ -1726,7 +1656,7 @@ export default function App() {
       vecLayers,
       vecRegMarks,
       { width: printWidthCm, height: printHeightCm, unit: printUnit },
-      { smoothness: vecSmoothness, mode: vecPathMode }
+      { smoothness: vecSmoothness, mode: vecPathMode, trappingPx: vecTrappingPx }
     );
     const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -1766,25 +1696,52 @@ export default function App() {
       c.height = h;
       const ctx = c.getContext('2d');
       if (!ctx) throw new Error('No se pudo inicializar el lienzo para el fotolito.');
-      const imgData = ctx.createImageData(w, h);
-      const dst = imgData.data;
 
-      for (let y = 0; y < h; y++) {
-        const sy = Math.min(vh - 1, Math.floor((y / h) * vh));
-        for (let x = 0; x < w; x++) {
-          const sourceX = mirrorMode ? (w - 1 - x) : x;
-          const sx = Math.min(vw - 1, Math.floor((sourceX / w) * vw));
-          if (labelMap[sy * vw + sx] === layerIndex) {
-            const idx = (y * w + x) * 4;
-            // Fotolito en negro puro al 100% de densidad para insolación serigráfica
-            dst[idx] = 0;
-            dst[idx + 1] = 0;
-            dst[idx + 2] = 0;
-            dst[idx + 3] = 255;
+      const targetLayer = vecLayers[layerIndex];
+      const layerPathData =
+        vecPathMode === 'bezier'
+          ? targetLayer?.pathData || traceLayerToBezierSvgPath(labelMap, vw, vh, layerIndex, vecSmoothness)
+          : '';
+
+      if (vecPathMode === 'bezier' && layerPathData && typeof Path2D !== 'undefined') {
+        // Fotolito vectorial nativo a 300/600 DPI renderizando directamente las Curvas Bézier Cúbicas (Path2D)
+        ctx.save();
+        if (mirrorMode) {
+          ctx.translate(w, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.scale(w / Math.max(1, vw), h / Math.max(1, vh));
+        const path2d = new Path2D(layerPathData);
+        ctx.fillStyle = '#000000';
+        ctx.fill(path2d, 'evenodd');
+        if (vecTrappingPx > 0) {
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = vecTrappingPx;
+          ctx.lineJoin = 'round';
+          ctx.stroke(path2d);
+        }
+        ctx.restore();
+      } else {
+        const imgData = ctx.createImageData(w, h);
+        const dst = imgData.data;
+
+        for (let y = 0; y < h; y++) {
+          const sy = Math.min(vh - 1, Math.floor((y / h) * vh));
+          for (let x = 0; x < w; x++) {
+            const sourceX = mirrorMode ? (w - 1 - x) : x;
+            const sx = Math.min(vw - 1, Math.floor((sourceX / w) * vw));
+            if (labelMap[sy * vw + sx] === layerIndex) {
+              const idx = (y * w + x) * 4;
+              // Fotolito en negro puro al 100% de densidad para insolación serigráfica
+              dst[idx] = 0;
+              dst[idx + 1] = 0;
+              dst[idx + 2] = 0;
+              dst[idx + 3] = 255;
+            }
           }
         }
+        ctx.putImageData(imgData, 0, 0);
       }
-      ctx.putImageData(imgData, 0, 0);
       drawRegistrationMarksOnCanvas(ctx, w, h, '#000000');
 
       // Etiqueta técnica de la pantalla con fondo de reserva blanco para no mezclarse con el arte
@@ -3107,7 +3064,7 @@ export default function App() {
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-stone-300 font-medium">
-                      Número de Colores (Pantallas)
+                      Número de Colores (K-Means++ CIE L*a*b*)
                     </span>
                     <span className="text-emerald-400 font-mono font-bold">
                       {vecNumColors} tintas
@@ -3119,11 +3076,43 @@ export default function App() {
                     max="10"
                     value={vecNumColors}
                     onChange={(e) => {
+                      vecCustomPaletteRef.current = null;
                       setVecNumColors(Number(e.target.value));
                       setVecPreviewPending(true);
                     }}
                     className="w-full accent-emerald-400"
                   />
+                </div>
+
+                {/* Selector de Resolución de Rejilla de Vectorización (Micro-tipografía y Detalles) */}
+                <div>
+                  <label className="text-xs font-medium text-stone-300 block mb-1.5">
+                    Precisión de Detalle y Tipografía
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'standard', label: 'Estándar', desc: '420 px' },
+                      { id: 'high', label: 'Alta HD', desc: '680 px' },
+                      { id: 'ultra', label: 'Ultra Texto', desc: '960 px' }
+                    ].map((lvl) => (
+                      <button
+                        key={lvl.id}
+                        type="button"
+                        onClick={() => {
+                          setVecDetailLevel(lvl.id);
+                          setVecPreviewPending(true);
+                        }}
+                        className={`p-1.5 rounded-lg border text-center transition ${
+                          vecDetailLevel === lvl.id
+                            ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                            : 'border-stone-800 text-stone-400 hover:bg-stone-800/50'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold">{lvl.label}</div>
+                        <div className="text-[9px] font-mono text-stone-400">{lvl.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
@@ -3147,12 +3136,39 @@ export default function App() {
                 </div>
 
                 <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-stone-300 font-medium">
+                      Solape / Trapping Serigráfico
+                    </span>
+                    <span className="text-emerald-400 font-mono">{vecTrappingPx.toFixed(2)} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.25"
+                    value={vecTrappingPx}
+                    onChange={(e) => {
+                      setVecTrappingPx(Number(e.target.value));
+                      setVecPreviewPending(true);
+                    }}
+                    className="w-full accent-emerald-400"
+                  />
+                  <p className="text-[10px] text-stone-500 mt-0.5">
+                    Expande sutilmente el contorno de cada tinta para evitar micro-costuras vacías entre colores adyacentes.
+                  </p>
+                </div>
+
+                <div>
                   <label className="text-xs font-medium text-stone-300 block mb-1.5">
-                    Geometría de Trazado SVG
+                    Geometría de Trazado SVG y Vista Previa
                   </label>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      onClick={() => setVecPathMode('bezier')}
+                      onClick={() => {
+                        setVecPathMode('bezier');
+                        setVecPreviewPending(true);
+                      }}
                       className={`p-2 rounded-lg border text-left transition ${
                         vecPathMode === 'bezier'
                           ? 'bg-emerald-500/15 border-emerald-500 text-white'
@@ -3165,7 +3181,10 @@ export default function App() {
                       </div>
                     </button>
                     <button
-                      onClick={() => setVecPathMode('rle')}
+                      onClick={() => {
+                        setVecPathMode('rle');
+                        setVecPreviewPending(true);
+                      }}
                       className={`p-2 rounded-lg border text-left transition ${
                         vecPathMode === 'rle'
                           ? 'bg-emerald-500/15 border-emerald-500 text-white'
@@ -3197,9 +3216,23 @@ export default function App() {
                   <span className="text-xs font-bold text-stone-200">
                     Capas de Tinta Detectadas ({vecLayers.length})
                   </span>
-                  <span className="text-[10px] text-stone-400">
-                    Clic en color para editarlo
-                  </span>
+                  {vecCustomPaletteRef.current ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        vecCustomPaletteRef.current = null;
+                        runVectorization(getToolSourceImage('vector'), null);
+                        setVecPreviewPending(true);
+                      }}
+                      className="text-[10px] text-emerald-400 hover:underline"
+                    >
+                      Restablecer colores auto
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-stone-400">
+                      Clic en color para editarlo
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -3215,6 +3248,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = [...vecLayers];
                             updated[idx] = { ...updated[idx], hex: e.target.value };
+                            vecCustomPaletteRef.current = updated;
                             setVecLayers(updated);
                             setVecPreviewPending(true);
                           }}
@@ -3235,6 +3269,7 @@ export default function App() {
                           onClick={() => {
                             const updated = [...vecLayers];
                             updated[idx] = { ...updated[idx], visible: !updated[idx].visible };
+                            vecCustomPaletteRef.current = updated;
                             setVecLayers(updated);
                             setVecPreviewPending(true);
                           }}
