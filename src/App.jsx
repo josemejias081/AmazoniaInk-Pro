@@ -15,6 +15,7 @@ import {
   MAX_EXPORT_PIXELS
 } from './utils/printProduction.js';
 import GangSheet, { makeGangEntry } from './GangSheet.jsx';
+import MockupStudio from './MockupStudio.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
 import { deleteProject, getProject, listProjects, saveProject } from './utils/projectStore.js';
 import { removeBackground, hexToRgb, rgbToHex } from './utils/backgroundRemoval.js';
@@ -1848,11 +1849,20 @@ export default function App() {
         </div>
 
         {/* Controles superiores según el modo activo */}
-        {activeTab === 'gangsheet' ? (
+        {activeTab === 'gangsheet' || activeTab === 'mockups' ? (
           <div className="flex items-center gap-3">
             <span className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
-              <Layers className="w-3.5 h-3.5" />
-              Creador de Metros DTF (58–60 cm)
+              {activeTab === 'gangsheet' ? (
+                <>
+                  <Layers className="w-3.5 h-3.5" />
+                  Creador de Metros DTF (58–60 cm)
+                </>
+              ) : (
+                <>
+                  <Shirt className="w-3.5 h-3.5" />
+                  Estudio de Mockups 3D & Fichas de Aprobación
+                </>
+              )}
             </span>
             <button
               type="button"
@@ -2018,7 +2028,7 @@ export default function App() {
         {/* ------------------------------------------------------------------
             1. MENÚ LATERAL IZQUIERDO (MÓDULOS DE TRABAJO)
         ------------------------------------------------------------------ */}
-        <aside className={activeTab === 'gangsheet' ? 'hidden' : 'w-full lg:w-64 bg-stone-900 border-b lg:border-b-0 lg:border-r border-stone-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0'}>
+        <aside className={activeTab === 'gangsheet' || activeTab === 'mockups' ? 'hidden' : 'w-full lg:w-64 bg-stone-900 border-b lg:border-b-0 lg:border-r border-stone-800 p-3 flex lg:flex-col justify-between gap-2 overflow-x-auto shrink-0'}>
           <div className="flex lg:flex-col gap-1.5 w-full">
             <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-stone-500 px-3 py-1.5">
               Flujo de Trabajo
@@ -2061,8 +2071,15 @@ export default function App() {
                 badge: 'Rollo DTF'
               },
               {
+                id: 'mockups',
+                title: '6. Mockups 3D & Fichas',
+                subtitle: 'Camisetas, Tazas, Gorras y Libros',
+                icon: Shirt,
+                badge: 'Vista Cliente'
+              },
+              {
                 id: 'export',
-                title: '6. Centro de Exportación',
+                title: '7. Centro de Exportación',
                 subtitle: 'PNG 300 DPI, SVG y Fotolitos',
                 icon: Download,
                 badge: 'Listo'
@@ -2137,10 +2154,25 @@ export default function App() {
         )}
 
         {/* ------------------------------------------------------------------
+            MODO ESTUDIO DE MOCKUPS 3D/2.5D & FICHAS DE APROBACIÓN
+        ------------------------------------------------------------------ */}
+        {activeTab === 'mockups' && (
+          <MockupStudio
+            currentImageData={previewBufferRef.current || currentBaseImageData}
+            activeDesignName={activePresetName}
+            printWidthCm={printUnit === 'in' ? Number((printWidthCm * 2.54).toFixed(1)) : printWidthCm}
+            printHeightCm={printUnit === 'in' ? Number((printHeightCm * 2.54).toFixed(1)) : printHeightCm}
+            printDpi={printDpi}
+            showToast={showToast}
+            onExitMockups={() => setActiveTab('bg')}
+          />
+        )}
+
+        {/* ------------------------------------------------------------------
             2. LIENZO CENTRAL INTERACTIVO Y SIMULADOR DE CAMISETA
         ------------------------------------------------------------------ */}
         <main
-          className={activeTab === 'gangsheet' ? 'hidden' : 'flex-1 flex flex-col bg-stone-950 relative overflow-hidden min-h-[420px]'}
+          className={activeTab === 'gangsheet' || activeTab === 'mockups' ? 'hidden' : 'flex-1 flex flex-col bg-stone-950 relative overflow-hidden min-h-[420px]'}
           onDragOver={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
@@ -2389,7 +2421,7 @@ export default function App() {
         {/* ------------------------------------------------------------------
             3. PANEL LATERAL DERECHO (CONTROLES DE CADA MÓDULO)
         ------------------------------------------------------------------ */}
-        <aside className={activeTab === 'gangsheet' ? 'hidden' : 'w-full lg:w-96 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6'}>
+        <aside className={activeTab === 'gangsheet' || activeTab === 'mockups' ? 'hidden' : 'w-full lg:w-96 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 p-5 overflow-y-auto shrink-0 flex flex-col justify-between gap-6'}>
           {isImageFullyOpaque && activeTab !== 'bg' && (
             <div className="flex items-start gap-2.5 rounded-xl border border-amber-600/50 bg-amber-950/30 p-3 text-xs text-amber-200">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
