@@ -7,7 +7,13 @@ import {
   Scissors, FileCode, CheckCircle2, AlertCircle, SplitSquareVertical,
   Droplet, Sun, Contrast, Move, HelpCircle, FileImage
 } from 'lucide-react';
-import { addPngPhysicalResolutionToBlob, calculateEffectiveDpi, calculateRasterSize } from './utils/printProduction.js';
+import {
+  addPngPhysicalResolutionToBlob,
+  calculateEffectiveDpi,
+  calculateRasterSize,
+  MAX_CANVAS_DIMENSION,
+  MAX_EXPORT_PIXELS
+} from './utils/printProduction.js';
 import GangSheet, { makeGangEntry } from './GangSheet.jsx';
 import { createWhiteUnderbasePreview } from './utils/underbase.js';
 import { deleteProject, getProject, listProjects, saveProject } from './utils/projectStore.js';
@@ -15,9 +21,9 @@ import { removeBackground, hexToRgb, rgbToHex } from './utils/backgroundRemoval.
 import { buildBezierVectorSVG } from './utils/bezierVectorizer.js';
 
 const MAX_HISTORY_STEPS = 20;
-const MAX_WORKING_DIMENSION = 2400;
-const MAX_SOURCE_DIMENSION = 16000;
-const MAX_SOURCE_PIXELS = 40_000_000;
+const MAX_WORKING_DIMENSION = 3600;
+const MAX_SOURCE_DIMENSION = MAX_CANVAS_DIMENSION;
+const MAX_SOURCE_PIXELS = MAX_EXPORT_PIXELS;
 
 // ============================================================================
 // CARGADOR DE IMAGEN OFICIAL AMAZONIAINK® (sources/logo.jpeg) Y CARTAS TÉCNICAS
@@ -586,13 +592,18 @@ export default function App() {
           sheetWidthCm: gangSheetState.sheetWidthCm,
           dpi: gangSheetState.dpi,
           gapMm: gangSheetState.gapMm,
+          edgeMarginMm: gangSheetState.edgeMarginMm ?? 2,
           cutLines: gangSheetState.cutLines,
           exportCutLines: gangSheetState.exportCutLines,
           initialized: gangSheetState.initialized,
+          canvasItems: Array.isArray(gangSheetState.canvasItems)
+            ? gangSheetState.canvasItems.map(item => ({ ...item }))
+            : [],
           entries: gangSheetState.entries.map(entry => ({
             id: entry.id,
             name: entry.name,
             widthCm: entry.widthCm,
+            heightCm: entry.heightCm,
             copies: entry.copies,
             rotation: entry.rotation,
             isCurrentDesign: Boolean(entry.isCurrentDesign),
@@ -657,16 +668,21 @@ export default function App() {
       setSourceOriginalFile(project.sourceOriginalFile);
       if (project.gangSheet && Array.isArray(project.gangSheet.entries)) {
         setGangSheetState({
-          sheetWidthCm: project.gangSheet.sheetWidthCm ?? 30,
+          sheetWidthCm: project.gangSheet.sheetWidthCm ?? 58,
           dpi: project.gangSheet.dpi ?? 300,
           gapMm: project.gangSheet.gapMm ?? 5,
+          edgeMarginMm: project.gangSheet.edgeMarginMm ?? 2,
           cutLines: project.gangSheet.cutLines ?? true,
           exportCutLines: project.gangSheet.exportCutLines ?? false,
           initialized: true,
+          canvasItems: Array.isArray(project.gangSheet.canvasItems)
+            ? project.gangSheet.canvasItems.map(item => ({ ...item }))
+            : [],
           entries: project.gangSheet.entries.map(entry => ({
             id: entry.id,
             name: entry.name,
             widthCm: entry.widthCm,
+            heightCm: entry.heightCm,
             copies: entry.copies,
             rotation: entry.rotation,
             isCurrentDesign: Boolean(entry.isCurrentDesign),
@@ -759,7 +775,7 @@ export default function App() {
   // ==========================================================================
   // MOTOR 2: GENERADOR DE SEMITONOS (HALFTONE DTF, SERIGRAFÍA Y CMYK)
   // ==========================================================================
-  const computeHalftone = useCallback((baseData) => {
+  const computeHalftone = useCallback((baseData, targetDpiBasis = 300) => {
     if (!baseData) return null;
     const w = baseData.width;
     const h = baseData.height;
@@ -767,7 +783,8 @@ export default function App() {
     const out = new ImageData(w, h);
     const dst = out.data;
 
-    const cellSize = Math.max(3, 300 / htFrequency);
+    const effectiveDpiBasis = Number.isFinite(targetDpiBasis) && targetDpiBasis > 30 ? targetDpiBasis : 300;
+    const cellSize = Math.max(3, effectiveDpiBasis / htFrequency);
     const rad = (htAngle * Math.PI) / 180;
     const cosA = Math.cos(rad);
     const sinA = Math.sin(rad);
@@ -1268,22 +1285,30 @@ export default function App() {
   ]);
 
   // ==========================================================================
-  // RENDERIZADO DEL LIENZO EN TIEMPO REAL
+  // RENDERIZADO DEL LIENZO EN TIEMPO REAL (COALESCIDO CON REQUESTANIMATIONFRAME)
   // ==========================================================================
   useEffect(() => {
     if (!currentBaseImageData || !displayCanvasRef.current) return;
 
-    let previewData = currentBaseImageData;
-    if (activeTab === 'bg' && bgInteractionMode === 'picker' && bgPreviewPending) {
-      previewData = computeBackgroundRemoval(currentBaseImageData);
-    } else if (activeTab === 'halftone' && htPreviewPending) {
-      previewData = computeHalftone(getToolSourceImage('halftone'));
-    } else if (activeTab === 'vector' && vecLayers.length > 0 && vecPreviewPending) {
-      previewData = renderVectorPreviewToImageData(getToolSourceImage('vector'), vecLayers);
-    }
+    const runRender = () => {
+      let previewData = currentBaseImageData;
+      if (activeTab === 'bg' && bgInteractionMode === 'picker' && bgPreviewPending) {
+        previewData = computeBackgroundRemoval(currentBaseImageData);
+      } else if (activeTab === 'halftone' && htPreviewPending) {
+        previewData = computeHalftone(getToolSourceImage('halftone'));
+      } else if (activeTab === 'vector' && vecLayers.length > 0 && vecPreviewPending) {
+        previewData = renderVectorPreviewToImageData(getToolSourceImage('vector'), vecLayers);
+      }
 
-    previewBufferRef.current = previewData;
-    renderPreviewToDisplayCanvas(previewData);
+      previewBufferRef.current = previewData;
+      renderPreviewToDisplayCanvas(previewData);
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      const rafId = window.requestAnimationFrame(runRender);
+      return () => window.cancelAnimationFrame(rafId);
+    }
+    runRender();
   }, [
     currentBaseImageData,
     activeTab,
@@ -3348,14 +3373,28 @@ export default function App() {
                       step="0.5"
                       min="1"
                       max="200"
-                      value={printWidthCm}
+                      value={printWidthCm || ''}
                       onChange={(e) => {
+                        if (e.target.value === '') {
+                          setPrintWidthCm(0);
+                          return;
+                        }
                         const val = Number(e.target.value);
-                        if (!Number.isFinite(val) || val <= 0) return;
+                        if (!Number.isFinite(val) || val < 0) return;
                         setPrintWidthCm(val);
-                        if (lockAspect) {
+                        if (lockAspect && val > 0) {
                           const ratio = imageSize.height / imageSize.width;
                           setPrintHeightCm(Number((val * ratio).toFixed(1)));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!printWidthCm || printWidthCm < 0.5) {
+                          const safeW = 10;
+                          setPrintWidthCm(safeW);
+                          if (lockAspect) {
+                            const ratio = imageSize.height / imageSize.width;
+                            setPrintHeightCm(Number((safeW * ratio).toFixed(1)));
+                          }
                         }
                       }}
                       className="w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
@@ -3370,14 +3409,28 @@ export default function App() {
                       step="0.5"
                       min="1"
                       max="200"
-                      value={printHeightCm}
+                      value={printHeightCm || ''}
                       onChange={(e) => {
+                        if (e.target.value === '') {
+                          setPrintHeightCm(0);
+                          return;
+                        }
                         const val = Number(e.target.value);
-                        if (!Number.isFinite(val) || val <= 0) return;
+                        if (!Number.isFinite(val) || val < 0) return;
                         setPrintHeightCm(val);
-                        if (lockAspect) {
+                        if (lockAspect && val > 0) {
                           const ratio = imageSize.width / imageSize.height;
                           setPrintWidthCm(Number((val * ratio).toFixed(1)));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!printHeightCm || printHeightCm < 0.5) {
+                          const safeH = 10;
+                          setPrintHeightCm(safeH);
+                          if (lockAspect) {
+                            const ratio = imageSize.width / imageSize.height;
+                            setPrintWidthCm(Number((safeH * ratio).toFixed(1)));
+                          }
                         }
                       }}
                       className="w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white"
