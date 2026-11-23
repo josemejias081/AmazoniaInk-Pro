@@ -5,6 +5,7 @@ import {
   calculateArtworkPlacementOnProduct,
   computeCapCrownStripTransforms,
   computeCylindricalStripTransforms,
+  computeMugHandle3DProjection,
   getMockupProductById,
   MOCKUP_PRODUCTS
 } from './mockupEngine.js';
@@ -84,4 +85,13 @@ test('computeCapCrownStripTransforms and buildClientApprovalSheetMetadata produc
   assert.ok(approval.approvalCode.startsWith('APR-'));
   assert.equal(approval.clientName, 'Cafetería Central');
   assert.equal(approval.productName, 'Taza (Fondo Exterior)');
+
+  // Verify 3D mug handle orbits with cylinder rotation
+  const handleAtZero = computeMugHandle3DProjection({ rotationDeg: 0, cylinderRadiusPx: 140 });
+  const handleTurnedFront = computeMugHandle3DProjection({ rotationDeg: 55, cylinderRadiusPx: 140 });
+  const handleTurnedBack = computeMugHandle3DProjection({ rotationDeg: -60, cylinderRadiusPx: 140 });
+
+  assert.ok(handleAtZero.outerOffsetX > handleAtZero.attachOffsetX);
+  assert.equal(handleTurnedFront.isFrontHemisphere, true);
+  assert.equal(handleTurnedBack.isFrontHemisphere, false, 'Handle rotates behind cylinder when turned past 90 deg');
 });

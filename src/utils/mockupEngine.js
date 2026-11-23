@@ -211,10 +211,10 @@ export const MOCKUP_PRODUCTS = [
       {
         id: 'bag-center',
         label: 'Área Central Bolsa',
-        recommendedWidthCm: 23,
+        recommendedWidthCm: 22,
         maxWidthCm: 28,
         anchorX: 0.5,
-        anchorY: 0.58
+        anchorY: 0.65
       }
     ]
   },
@@ -225,7 +225,7 @@ export const MOCKUP_PRODUCTS = [
     techniqueDefault: 'Sublimación / Grabado / UV DTF',
     physicalWidthCm: 22,
     physicalHeightCm: 16,
-    defaultColor: '#e2e8f0',
+    defaultColor: '#f8fafc',
     zones: [
       {
         id: 'bottle-wrap',
@@ -233,7 +233,7 @@ export const MOCKUP_PRODUCTS = [
         recommendedWidthCm: 14,
         maxWidthCm: 22,
         anchorX: 0.5,
-        anchorY: 0.56
+        anchorY: 0.59
       }
     ]
   }
@@ -369,6 +369,52 @@ export const computeCylindricalStripTransforms = ({
   }
 
   return strips;
+};
+
+/**
+ * Calcula la proyección 3D exacta del agarradero (asa) de la taza para que gire
+ * solidariamente con el cilindro según `rotationDeg` (-180° a +180°).
+ * En rotationDeg = 0°, el asa está a +78° (visible en el costado derecho con ligero escorzo 3D).
+ * Al girar la taza hacia la izquierda (rotationDeg < 0), el asa avanza hacia el frente (isFront = true).
+ * Al girar la taza hacia la derecha (rotationDeg > +12°), el asa pasa por detrás del cilindro (isFront = false).
+ */
+export const computeMugHandle3DProjection = ({
+  rotationDeg = 0,
+  cylinderRadiusPx = 140
+} = {}) => {
+  const R = Math.max(10, Number(cylinderRadiusPx) || 140);
+  // Ángulo fijo del asa respecto al centro frontal de la taza (+75° a la derecha cuando rotationDeg = 0)
+  const handleBaseAngleDeg = 75;
+  const thetaRad = ((handleBaseAngleDeg - Number(rotationDeg || 0)) * Math.PI) / 180;
+
+  const sinT = Math.sin(thetaRad);
+  const cosT = Math.cos(thetaRad);
+
+  // Coordenada X donde los anclajes superior e inferior del asa se unen a la pared de la taza
+  const attachOffsetX = R * sinT;
+  // Coordenada X del arco exterior del asa (se extiende radialmente desde el cilindro)
+  const radialExtension = R * 0.62;
+  const outerOffsetX = (R + radialExtension) * sinT;
+
+  // Profundidad Z normalizada (-1 detrás del cilindro .. +1 frente a la cámara)
+  const depthZ = cosT;
+  const isFrontHemisphere = depthZ >= -0.05;
+
+  // Grosor aparente y apertura del lazo en perspectiva según el ángulo
+  const perspectiveThicknessScale = 0.72 + 0.28 * Math.abs(sinT);
+  const loopVisibility = Math.abs(sinT); // 1 de perfil, 0 cuando el asa apunta directo a cámara
+
+  return {
+    thetaDeg: Number(((thetaRad * 180) / Math.PI).toFixed(2)),
+    attachOffsetX,
+    outerOffsetX,
+    depthZ,
+    isFrontHemisphere,
+    perspectiveThicknessScale,
+    loopVisibility,
+    sinT,
+    cosT
+  };
 };
 
 /**
