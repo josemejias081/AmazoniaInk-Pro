@@ -86,12 +86,13 @@ test('computeCapCrownStripTransforms and buildClientApprovalSheetMetadata produc
   assert.equal(approval.clientName, 'Cafetería Central');
   assert.equal(approval.productName, 'Taza (Fondo Exterior)');
 
-  // Verify 3D mug handle orbits with cylinder rotation
-  const handleAtZero = computeMugHandle3DProjection({ rotationDeg: 0, cylinderRadiusPx: 140 });
-  const handleTurnedFront = computeMugHandle3DProjection({ rotationDeg: 55, cylinderRadiusPx: 140 });
-  const handleTurnedBack = computeMugHandle3DProjection({ rotationDeg: -60, cylinderRadiusPx: 140 });
+  // Verify 3D mug handle is at 180 deg (opposite the 0 deg wrap center) with 1.85cm blank margin on each side
+  const handleAtFrontCenter = computeMugHandle3DProjection({ rotationDeg: 0, cylinderRadiusPx: 140 });
+  const handleAtRightThreeQuarter = computeMugHandle3DProjection({ rotationDeg: -75, cylinderRadiusPx: 140 });
+  const handleFacingCamera = computeMugHandle3DProjection({ rotationDeg: 180, cylinderRadiusPx: 140 });
 
-  assert.ok(handleAtZero.outerOffsetX > handleAtZero.attachOffsetX);
-  assert.equal(handleTurnedFront.isFrontHemisphere, true);
-  assert.equal(handleTurnedBack.isFrontHemisphere, false, 'Handle rotates behind cylinder when turned past 90 deg');
+  assert.equal(handleAtFrontCenter.isFrontHemisphere, false, 'At 0 deg (wrap center), handle is at 180 deg behind the mug');
+  assert.ok(handleAtRightThreeQuarter.outerOffsetX > handleAtRightThreeQuarter.attachOffsetX, 'At -75 deg, handle extends on right side');
+  assert.equal(handleFacingCamera.isFrontHemisphere, true, 'At 180 deg, handle faces the camera directly');
+  assert.equal(handleFacingCamera.blankMarginEachSideCm, 1.85);
 });

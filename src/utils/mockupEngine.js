@@ -131,23 +131,25 @@ export const MOCKUP_PRODUCTS = [
     name: 'Taza 11oz (Contorno)',
     category: 'Sublimación',
     techniqueDefault: 'Sublimación / UV DTF',
-    physicalWidthCm: 20,
-    physicalHeightCm: 9.5,
+    physicalWidthCm: 20.0, // Área máxima óptima horizontal (de 25.76 cm de circunferencia total, dejando 1.8-2.0 cm libres a cada lado del asa)
+    physicalHeightCm: 9.5, // Altura física 9.5 cm (altura óptima imprimible: 8.5 - 9.0 cm)
+    circumferenceCm: 25.76, // π × 8.2 cm de diámetro exterior
+    handleGapEachSideCm: 1.8, // 1.8 cm de margen blanco de seguridad a cada lado del asa
     defaultColor: '#ffffff',
     zones: [
       {
         id: 'full-wrap',
-        label: 'Envolvente Completo (20×9.5 cm)',
-        recommendedWidthCm: 20,
-        maxWidthCm: 21,
+        label: 'Envolvente Óptimo (20×8.8 cm · 1.8cm libre al asa)',
+        recommendedWidthCm: 20.0,
+        maxWidthCm: 20.8,
         anchorX: 0.5,
         anchorY: 0.5
       },
       {
         id: 'front-face',
-        label: 'Cara Frontal Visible (9×8.5 cm)',
-        recommendedWidthCm: 9,
-        maxWidthCm: 11,
+        label: 'Cara Frontal Individual (9×8.5 cm)',
+        recommendedWidthCm: 9.0,
+        maxWidthCm: 10.5,
         anchorX: 0.5,
         anchorY: 0.5
       }
@@ -303,42 +305,55 @@ export const calculateArtworkPlacementOnProduct = ({
   };
 };
 
+// Normaliza cualquier ángulo en radianes al rango [-PI, +PI]
+const normalizeAngleRad = (rad) => Math.atan2(Math.sin(rad), Math.cos(rad));
+
 /**
  * Calcula las franjas verticales de proyección cilíndrica 3D para envolver un diseño plano
- * alrededor de una Taza o Termo cilíndrico con rotación interactiva (-180° a +180°).
+ * alrededor de una Taza (circunferencia 25.76 cm = 360°) o Termo con rotación completa (-180° a +180°).
+ *
+ * Geometría real de sublimación en Taza 11 oz:
+ * - El centro del diseño (u = 0.5) está en 0° (exactamente opuesto al asa, que está en 180°).
+ * - El arco máximo imprimible se limita a 290° (±145°), dejando siempre un margen mínimo de 35°
+ *   (~1.8 - 2.0 cm libres de cerámica sin estampar) a AMBOS lados del asa (180°).
  */
 export const computeCylindricalStripTransforms = ({
   cylinderRadiusPx = 140,
   artworkWidthPx = 600,
-  wrapAngleDeg = 230, // Ángulo total del cilindro que abraza la plantilla (230° en una taza 11oz)
-  rotationDeg = 0, // Giro interactivo del usuario
-  stripCount = 64
+  wrapAngleDeg = 280, // 20 cm sobre 25.76 cm de circunferencia = 279.5° (deja ~40° = 2.0 cm libres a cada lado del asa en 180°)
+  rotationDeg = 0, // Giro interactivo del usuario (-180° a +180°)
+  stripCount = 84
 } = {}) => {
   const R = Math.max(10, Number(cylinderRadiusPx) || 140);
-  const N = clamp(Math.round(Number(stripCount) || 64), 8, 180);
-  const totalWrapRad = (clamp(Number(wrapAngleDeg) || 230, 30, 350) * Math.PI) / 180;
+  const N = clamp(Math.round(Number(stripCount) || 84), 8, 180);
+  // Tope físico de 290° para respetar siempre el margen de seguridad de 1.5-2.0 cm a ambos lados del asa (en 180°)
+  const totalWrapRad = (clamp(Number(wrapAngleDeg) || 280, 25, 290) * Math.PI) / 180;
   const rotRad = ((Number(rotationDeg) || 0) * Math.PI) / 180;
   const halfWrap = totalWrapRad / 2;
+  const halfStepRad = totalWrapRad / (2 * N);
 
   const strips = [];
+  const maxVisibleAngle = Math.PI * 0.488; // ~88° a izquierda y derecha de la cara frontal
+
   for (let i = 0; i < N; i++) {
     const u0 = i / N;
     const u1 = (i + 1) / N;
     const uMid = (u0 + u1) * 0.5;
 
-    // Ángulo sobre la superficie del cilindro (-halfWrap .. +halfWrap) más la rotación de la cámara
-    const theta0 = (u0 - 0.5) * totalWrapRad + rotRad;
-    const theta1 = (u1 - 0.5) * totalWrapRad + rotRad;
-    const thetaMid = (uMid - 0.5) * totalWrapRad + rotRad;
+    // Ángulo local de la franja sobre el cilindro (-halfWrap .. +halfWrap) más rotación de cámara,
+    // normalizado a [-PI, +PI] para que al girar más de 90° aparezcan ambos extremos de la imagen a cada lado del asa
+    const phiMid = (uMid - 0.5) * totalWrapRad;
+    const thetaMid = normalizeAngleRad(phiMid + rotRad);
+    const theta0 = thetaMid - halfStepRad;
+    const theta1 = thetaMid + halfStepRad;
 
-    // Solo son visibles las franjas que están en la cara frontal del cilindro (-PI/2 .. +PI/2)
-    const maxAngle = Math.PI * 0.485;
-    if (theta1 <= -maxAngle || theta0 >= maxAngle) {
+    if (theta1 <= -maxVisibleAngle || theta0 >= maxVisibleAngle) {
       continue;
     }
 
-    const clampedT0 = clamp(theta0, -maxAngle, maxAngle);
-    const clampedT1 = clamp(theta1, -maxAngle, maxAngle);
+    const clampedT0 = clamp(theta0, -maxVisibleAngle, maxVisibleAngle);
+    const clampedT1 = clamp(theta1, -maxVisibleAngle, maxVisibleAngle);
+    if (clampedT1 <= clampedT0) continue;
 
     // Proyección ortográfica sobre el eje X de pantalla: x = R * sin(theta)
     const x0 = R * Math.sin(clampedT0);
@@ -346,7 +361,7 @@ export const computeCylindricalStripTransforms = ({
     const destW = Math.max(0.5, x1 - x0);
 
     // Desplazamiento vertical de perspectiva elíptica (curvatura de la boca y base de la taza)
-    const cosMid = Math.cos(clamp(thetaMid, -maxAngle, maxAngle));
+    const cosMid = Math.cos(clamp(thetaMid, -maxVisibleAngle, maxVisibleAngle));
     const verticalCurveOffsetRatio = 1 - cosMid; // 0 en el centro, ~1 en los bordes laterales
 
     // Sombreado Lambertiano + brillo especular cerámico en torno a -22°
@@ -359,7 +374,7 @@ export const computeCylindricalStripTransforms = ({
       srcX: u0 * artworkWidthPx,
       srcW: Math.max(1, (u1 - u0) * artworkWidthPx),
       destOffsetX: x0,
-      destW: destW + 0.55, // Ligero solape sub-píxel para evitar grietas
+      destW: destW + 0.6, // Solape sub-píxel para evitar grietas
       cosDepth: cosMid,
       verticalCurveOffsetRatio,
       edgeShadow,
@@ -372,20 +387,22 @@ export const computeCylindricalStripTransforms = ({
 };
 
 /**
- * Calcula la proyección 3D exacta del agarradero (asa) de la taza para que gire
- * solidariamente con el cilindro según `rotationDeg` (-180° a +180°).
- * En rotationDeg = 0°, el asa está a +78° (visible en el costado derecho con ligero escorzo 3D).
- * Al girar la taza hacia la izquierda (rotationDeg < 0), el asa avanza hacia el frente (isFront = true).
- * Al girar la taza hacia la derecha (rotationDeg > +12°), el asa pasa por detrás del cilindro (isFront = false).
+ * Calcula la proyección 3D exacta del agarradero (asa) de la taza situada en 180°
+ * (exactamente en el lado opuesto al centro de la plantilla 0°), girando solidariamente
+ * con el cilindro según `rotationDeg` (-180° a +180°).
+ *
+ * Como la plantilla máxima abarca ±140° (20 cm de los 25.76 cm de circunferencia) y el asa
+ * está en 180° (ocupando ±10°), quedan siempre ~30° (1.8 - 2.0 cm) de cerámica libre sin imagen
+ * a AMBOS lados del asa.
  */
 export const computeMugHandle3DProjection = ({
   rotationDeg = 0,
   cylinderRadiusPx = 140
 } = {}) => {
   const R = Math.max(10, Number(cylinderRadiusPx) || 140);
-  // Ángulo fijo del asa respecto al centro frontal de la taza (+75° a la derecha cuando rotationDeg = 0)
-  const handleBaseAngleDeg = 75;
-  const thetaRad = ((handleBaseAngleDeg - Number(rotationDeg || 0)) * Math.PI) / 180;
+  // En cualquier taza real de sublimación, el asa está a 180° del centro del diseño (0°)
+  const handleBaseAngleDeg = 180;
+  const thetaRad = normalizeAngleRad(((handleBaseAngleDeg + Number(rotationDeg || 0)) * Math.PI) / 180);
 
   const sinT = Math.sin(thetaRad);
   const cosT = Math.cos(thetaRad);
@@ -402,7 +419,7 @@ export const computeMugHandle3DProjection = ({
 
   // Grosor aparente y apertura del lazo en perspectiva según el ángulo
   const perspectiveThicknessScale = 0.72 + 0.28 * Math.abs(sinT);
-  const loopVisibility = Math.abs(sinT); // 1 de perfil, 0 cuando el asa apunta directo a cámara
+  const loopVisibility = Math.abs(sinT); // 1 de perfil (±90°), 0 cuando el asa apunta directo a cámara (0° o 180°)
 
   return {
     thetaDeg: Number(((thetaRad * 180) / Math.PI).toFixed(2)),
@@ -413,7 +430,8 @@ export const computeMugHandle3DProjection = ({
     perspectiveThicknessScale,
     loopVisibility,
     sinT,
-    cosT
+    cosT,
+    blankMarginEachSideCm: 1.85
   };
 };
 

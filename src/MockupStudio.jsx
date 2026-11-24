@@ -599,21 +599,27 @@ const renderCylindricalMug3D = (
   ctx.restore();
 
   // Proyección cilíndrica 3D del diseño por micro-franjas verticales
+  // Circunferencia física real de taza 11oz = 25.76 cm (360°).
+  // Un diseño envolvente óptimo de 20.0 cm abarca (20.0 / 25.76) * 360° = 279.5° (±139.75°),
+  // dejando ~30° (1.8 - 2.0 cm) de cerámica blanca sin estampar a AMBOS lados del asa (situada en 180°).
   if (artCanvas) {
     ctx.save();
     buildCylinderPath();
     ctx.clip();
 
-    const wrapDeg = Math.max(45, Math.min(250, placement.widthRatio * 235));
+    const mugCircumferenceCm = 25.76;
+    const rawWrapDeg = (placement.effectiveWidthCm / mugCircumferenceCm) * 360;
+    const wrapDeg = Math.max(35, Math.min(282, rawWrapDeg));
     const strips = computeCylindricalStripTransforms({
       cylinderRadiusPx: radiusX,
       artworkWidthPx: artCanvas.width,
       wrapAngleDeg: wrapDeg,
       rotationDeg,
-      stripCount: 76
+      stripCount: 96
     });
 
-    const artHeightPx = bodyH * Math.min(0.84, Math.max(0.22, placement.heightRatio * 0.86));
+    // Altura óptima vertical: máximo 8.8 cm sobre los 9.5 cm de la taza (~91%), dejando margen superior e inferior
+    const artHeightPx = bodyH * Math.min(0.88, Math.max(0.22, placement.heightRatio * 0.91));
     const baseArtTopY = topY + (bodyH - artHeightPx) * placement.centerYRatio;
 
     strips.forEach((st) => {
@@ -809,7 +815,8 @@ export default function MockupStudio({
     setOffsetXPercent(0);
     setOffsetYPercent(0);
     setScaleMultiplier(1);
-    setRotationDeg(0);
+    // En la taza 11oz iniciamos en vista 3/4 (-75°) donde se aprecia el diseño frontal, el margen libre de 1.8 cm y el asa a la derecha
+    setRotationDeg(nextProdId === 'mug-wrap' ? -75 : 0);
     if (
       nextProdId === 'mug-wrap' ||
       nextProdId === 'mug-bottom' ||
@@ -900,9 +907,9 @@ export default function MockupStudio({
         drawStudioBackdrop(ctx, w, h, studioTheme);
         if (mugTripleView) {
           const views = [
-            { angle: -55, x: w * 0.21, label: 'Lado Izq. (-55°)' },
-            { angle: 0, x: w * 0.5, label: 'Frente (0°)' },
-            { angle: 55, x: w * 0.79, label: 'Lado Der. (+55°)' }
+            { angle: 75, x: w * 0.21, label: 'Lado Izq. (+75°)' },
+            { angle: 0, x: w * 0.5, label: 'Centro (0°)' },
+            { angle: -75, x: w * 0.79, label: 'Lado Der. + Asa (-75°)' }
           ];
           views.forEach((v) => {
             renderCylindricalMug3D(ctx, w, h, {
@@ -994,7 +1001,10 @@ export default function MockupStudio({
       selectedProductId === 'thermos-bottle' ||
       selectedProductId === 'mug-bottom'
     ) {
-      const nextRot = Math.max(-110, Math.min(110, Math.round(active.initialRotation + dx * 0.45)));
+      let nextRot = Math.round(active.initialRotation + dx * 0.55);
+      // Permitir rotación continua de 360° (-180° a +180°) para poder ver tanto el frente como ambos márgenes junto al asa en 180°
+      if (nextRot > 180) nextRot -= 360;
+      if (nextRot < -180) nextRot += 360;
       setRotationDeg(nextRot);
     } else {
       setOffsetXPercent(
@@ -1372,37 +1382,66 @@ export default function MockupStudio({
                 <div className="flex justify-between text-xs">
                   <span className="text-stone-300">
                     {selectedProductId === 'mug-wrap'
-                      ? 'Giro 3D (Cilindro + Asa Orbital):'
+                      ? 'Giro 360° (Cilindro + Asa en 180°):'
                       : 'Giro 3D del Soporte:'}
                   </span>
                   <span className="text-amber-300 font-mono font-bold">{rotationDeg}°</span>
                 </div>
                 <input
                   type="range"
-                  min="-110"
-                  max="110"
+                  min="-180"
+                  max="180"
                   step="1"
                   value={rotationDeg}
                   onChange={(e) => setRotationDeg(Number(e.target.value))}
                   className="w-full accent-amber-400"
                 />
                 {selectedProductId === 'mug-wrap' && (
-                  <button
-                    type="button"
-                    onClick={() => setMugTripleView((v) => !v)}
-                    className={`w-full py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                      mugTripleView
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                        : 'bg-stone-900 border-stone-700 text-stone-300 hover:bg-stone-800'
-                    }`}
-                  >
-                    <Columns className="w-3.5 h-3.5" />
-                    <span>
-                      {mugTripleView
-                        ? 'Vista Triple Activa (Izq · Centro · Der)'
-                        : 'Ver Taza Completa en 3 Ángulos'}
-                    </span>
-                  </button>
+                  <>
+                    <div className="grid grid-cols-4 gap-1 text-[10px]">
+                      {[
+                        { label: 'Frente 0°', deg: 0 },
+                        { label: 'Der+Asa', deg: -75 },
+                        { label: 'Izq+Asa', deg: 75 },
+                        { label: 'Asa 180°', deg: 180 }
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setMugTripleView(false);
+                            setRotationDeg(preset.deg);
+                          }}
+                          className={`py-1 px-1.5 rounded border font-semibold transition cursor-pointer ${
+                            rotationDeg === preset.deg && !mugTripleView
+                              ? 'bg-amber-400/20 border-amber-400 text-amber-300'
+                              : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-stone-400 leading-tight">
+                      Estándar 11oz (Ø 8.2cm · 25.76cm circunf.): plantilla óptima de <strong>20.0 × 8.8 cm</strong> con <strong>1.8 cm libres</strong> sin tinta a cada lado del asa.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setMugTripleView((v) => !v)}
+                      className={`w-full py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        mugTripleView
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                          : 'bg-stone-900 border-stone-700 text-stone-300 hover:bg-stone-800'
+                      }`}
+                    >
+                      <Columns className="w-3.5 h-3.5" />
+                      <span>
+                        {mugTripleView
+                          ? 'Vista Triple Activa (Izq · Centro · Der)'
+                          : 'Ver Taza Completa en 3 Ángulos'}
+                      </span>
+                    </button>
+                  </>
                 )}
               </div>
             ) : (
